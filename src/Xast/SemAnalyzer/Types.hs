@@ -105,8 +105,9 @@ data SystemSig = SystemSig
    deriving (Eq, Show)
 
 data VarInfo = VarInfo
-   { ty :: Type
-   , id :: VarId
+   { ty         :: Type
+   , id         :: VarId
+   , quantified :: [Int]
    }
    deriving (Eq, Show)
 

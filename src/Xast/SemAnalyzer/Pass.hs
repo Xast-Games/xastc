@@ -951,6 +951,28 @@ freshTyVar = do
    put st { tyVarSupply = n + 1 }
    return $ TyVar n
 
+freeTyVars :: Type -> S.Set Int
+freeTyVars ty = go [ty] S.empty
+   where
+      go :: [Type] -> S.Set Int -> S.Set Int
+      go [] acc = acc
+      go (t:rest) acc = case t of
+         TyVar n        -> go rest (S.insert n acc)
+         TyApp a b      -> go (a : b : rest) acc
+         TyTuple xs     -> go (xs ++ rest) acc
+         TyFn args ret  -> go (ret : args ++ rest) acc
+         _ -> go rest acc
+
+generalize :: Type -> SemAnalyzer [Int]
+generalize ty = do
+   ty'  <- resolve ty
+   vars <- asks (.vars)
+   envFree <- fmap S.unions . forM (M.elems vars) $ \vi -> do
+      t <- resolve vi.ty
+      pure (freeTyVars t S.\\ S.fromList vi.quantified)
+
+   return $ S.toList (freeTyVars ty' S.\\ envFree)
+
 freshVarId :: SemAnalyzer VarId
 freshVarId = do
    st <- get
@@ -1082,6 +1104,14 @@ substGnr m = \case
    TyFn args r   -> TyFn (map (substGnr m) args) (substGnr m r)
    t             -> t
 
+substTyVars :: M.Map Int Type -> Type -> Type
+substTyVars m = \case
+   TyVar i       -> M.findWithDefault (TyVar i) i m
+   TyApp a b     -> TyApp (substTyVars m a) (substTyVars m b)
+   TyTuple xs    -> TyTuple (map (substTyVars m) xs)
+   TyFn args r   -> TyFn (map (substTyVars m) args) (substTyVars m r)
+   t             -> t
+
 typeOf :: Expr Typed -> Type
 typeOf = (.ty) . exprAnnotation
 
@@ -1099,7 +1129,10 @@ inferType imps expr = case expr of
       modSym  <- lookupCurrentModule x
       impSym  <- lookupUnqualifiedSymbol imps x
       ty <- case thisSym of
-         Just vi -> resolve vi.ty
+         Just vi -> do
+            t     <- resolve vi.ty
+            fresh <- mapM (const freshTyVar) vi.quantified
+            pure (substTyVars (M.fromList (zip vi.quantified fresh)) t)
          Nothing -> case modSym <|> impSym of
             Just (SymbolFn _ _ sig)       -> instantiate sig
             Just (SymbolExternFn _ _ sig) -> instantiate sig
@@ -1156,8 +1189,9 @@ inferType imps expr = case expr of
       xs' <- mapM (inferType imps) xs
       -- Check inner list types
       forM_ xs' $ \other ->
-         unless (typeOf x' == typeOf other) $
-            errSem (SEListElementTypeMismatch (exprAnnotation x').location (typeOf x') (exprAnnotation other).location (typeOf other))
+         compareListElems 
+            (exprAnnotation x').location (typeOf x')
+            (exprAnnotation other).location (typeOf other)
       -- Type of list is defined as `List a`,
       -- where a is a type of the first element
       let ty = TyApp (TyCon (Ident "List")) (typeOf x')
@@ -1347,7 +1381,13 @@ typeLetBinds imps [] body = ([],) <$> inferType imps body
 typeLetBinds imps (Let pat value : rest) body = do
    value'  <- inferType imps value
    (pat', patVars) <- inferPattern imps (typeOf value') pat
-   (rest', body') <- withVars patVars (typeLetBinds imps rest body)
+   patVars' <- case pat of
+      PatVar {} -> forM patVars $ \vi -> do
+         qs <- generalize vi.ty
+         pure vi { quantified = qs }
+      _ -> pure patVars
+
+   (rest', body') <- withVars patVars' (typeLetBinds imps rest body)
    pure (Let pat' value' : rest', body')
 
 inferPattern
@@ -1358,7 +1398,7 @@ inferPattern
 inferPattern imps ty p = case p of
    PatVar (ResolvedInfo loc mRes) x -> do
       vid <- freshVarId
-      pure (PatVar (TypedInfo loc ty mRes) x, M.singleton x (VarInfo ty vid))
+      pure (PatVar (TypedInfo loc ty mRes) x, M.singleton x (VarInfo ty vid []))
 
    PatWildcard (ResolvedInfo loc mRes) ->
       pure (PatWildcard (TypedInfo loc ty mRes), M.empty)
@@ -1469,6 +1509,15 @@ compareThenElse thenLoc thenType elseLoc elseType = do
       thenType' <- resolve thenType
       elseType' <- resolve elseType
       errSem (SEThenElseTypeMismatch thenLoc thenType' elseLoc elseType')
+
+-- | Unifies two list element types
+compareListElems :: Location -> Type -> Location -> Type -> SemAnalyzer ()
+compareListElems firstLoc firstTy otherLoc otherTy = do
+   ((), reports) <- censor (const []) $ listen (unify firstLoc firstTy otherTy)
+   when (any isSemError reports) $ do
+      firstTy' <- resolve firstTy
+      otherTy' <- resolve otherTy
+      errSem (SEListElementTypeMismatch firstLoc firstTy' otherLoc otherTy')
 
 isSemError :: SemReport -> Bool
 isSemError (SemError _) = True

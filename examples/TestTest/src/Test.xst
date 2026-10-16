@@ -17,6 +17,13 @@ extern fn opNeg(a) -> a;
 
 type Bool = True | False;
 
+fn f () -> (Bool, Int);
+fn f = 
+    let id = .\x -> x,
+    let a = id True,
+    let b = id 12
+    in (a, b);
+
 fn double (Int) -> Int;
 fn double x =
     let y = True,
