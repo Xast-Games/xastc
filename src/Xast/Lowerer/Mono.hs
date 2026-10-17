@@ -81,10 +81,22 @@ buildTypeDef inst = do
    ctors <- forM tpl.ctors $ \c -> do
       tys <- mapM (monoType . subst sub) (payloadTypes c.payload)
       pure KirCtor
-         { name   = Ident (mangle (TypeInst c.name inst.args))
+         { name   = mangleCtor (foldl TyApp (TyCon inst.name) inst.args) c.name
          , fields = tys
          }
-   pure KirTypeDef { name = KirName (mangle inst), ctors = ctors }
+   
+   return KirTypeDef 
+      { name = KirName (mangle inst)
+      , ctors = ctors 
+      }
+
+mangleCtor :: Type -> Ident -> Ident
+mangleCtor resTy c = Ident (mangle (TypeInst c (snd (splitApp resTy))))
+
+ctorResultTy :: Type -> Type
+ctorResultTy = \case
+   TyFn _ r -> r
+   t        -> t
 
 identFromKirName :: KirName -> Ident
 identFromKirName (KirName t) = Ident t
