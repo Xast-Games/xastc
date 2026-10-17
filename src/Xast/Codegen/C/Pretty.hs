@@ -77,16 +77,18 @@ prettyStmt = \case
          ]
       where
          prettyCase (lbl, stmts) = vsep
-            [ "case" <+> prettyExpr lbl <> ":"
+            [ "case" <+> prettyExpr lbl <> ": {"
             , indent 4 (vsep (map prettyStmt stmts ++ ["break;"]))
+            , "}"
             ]
          prettyDefault CDefaultUnreachable = vsep
             [ "default:"
             , indent 4 "__builtin_unreachable();"
             ]
          prettyDefault (CDefaultStmts stmts) = vsep
-            [ "default:"
+            [ "default: {"
             , indent 4 (vsep (map prettyStmt stmts ++ ["break;"]))
+            , "}"
             ]
 
 

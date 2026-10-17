@@ -46,6 +46,7 @@ library
         Xast.Lowerer.Types,
         Xast.Lowerer.Pass,
         Xast.Lowerer.DecisionTree,
+        Xast.Lowerer.Mono,
 
         Xast.Codegen.C.Monad,
         Xast.Codegen.C.Types,

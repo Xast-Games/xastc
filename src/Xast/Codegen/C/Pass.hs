@@ -90,6 +90,11 @@ codegenInstruct = \case
       pure [CDeclStmt (typeToCType retType) resultName (Just (CInvoke (CVar fnName) (map (CExprArg . valueToExpr) callArgs)))]
    KirAssign bid val ->
       pure [CExprStmt (CAssign (CVar (bindingName bid)) (valueToExpr val))]
+   KirStore ty dest val -> pure $ case dest of
+      DestLocal lid -> [CDeclStmt (typeToCType ty) (localName lid) (Just (valueToExpr val))]
+      DestBinding _ -> [assignToDest dest val]
+   KirField {} ->
+      todo__ "payload field access needs an ADT layout in the C backend"
    KirMatch { ty = ty, scrutinee = scrut, arms = arms, fallback = fallback, dest = dest, exhaustive = exhaustive } ->
       codegenMatch ty scrut arms fallback dest exhaustive
 
@@ -148,9 +153,12 @@ codegenMatch ty scrut arms fallback dest exhaustive = do
          defStmts <- codegenInstructs branch.instructs
          pure (defStmts ++ [assignDest branch.value])
 
-      assignDest v = case dest of
-         DestBinding bid -> CExprStmt (CAssign (CUnary Deref (CVar (bindingName bid))) (valueToExpr v))
-         DestLocal lid   -> CExprStmt (CAssign (CVar (localName lid)) (valueToExpr v))
+      assignDest = assignToDest dest
+
+assignToDest :: KirDest -> KirValue -> CStmt
+assignToDest dest v = case dest of
+   DestBinding bid -> CExprStmt (CAssign (CUnary Deref (CVar (bindingName bid))) (valueToExpr v))
+   DestLocal lid   -> CExprStmt (CAssign (CVar (localName lid)) (valueToExpr v))
 
 localName :: KirLocalId -> Text
 localName (KirLocalId n) = "_l" <> T.pack (show n)

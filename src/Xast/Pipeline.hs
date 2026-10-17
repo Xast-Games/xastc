@@ -85,12 +85,12 @@ runCompile_ dir = runExceptT $ do
 
    -- Semantic analysis
    semResult <- runExceptT $ fullAnalysis  (lift . printWarnings) (\path content -> liftIO $ writeFile path content) programs target
-   (warnings, progsAnalyzed) <- case semResult of
+   (warnings, progsAnalyzed, ctorSpans) <- case semResult of
       Left errs -> throwError (XastSemAnalyzeError <$> errs)
-      Right res -> return (res.warningsCount, res.progs)
+      Right res -> return (res.warningsCount, res.progs, res.ctorSpans)
 
    -- Lowering AST into KIRA
-   let loweredIR = lowerPrograms progsAnalyzed
+   let (loweredIR, _typeDefs) = lowerPrograms ctorSpans progsAnalyzed
 
    -- Generating C
    let generatedC = codegen loweredIR

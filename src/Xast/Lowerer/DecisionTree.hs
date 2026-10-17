@@ -1,29 +1,36 @@
 module Xast.Lowerer.DecisionTree where
 
-import Xast.AST (Ident)
+import Xast.AST (LocalId, Type)
+import Xast.Lowerer.Types (KirTag)
 import Xast.Utils.Generic ((|>), unreachableWith)
 import Data.Maybe (catMaybes, isJust, mapMaybe, fromJust)
-import qualified Data.Set as S
-import Data.List (findIndex)
+import Data.List (findIndex, nub)
+
+data Occ = Occ Int [Int]
+   deriving (Eq, Ord, Show)
+
+occField :: Occ -> Int -> Occ
+occField (Occ root path) i = Occ root (path ++ [i])
+
+type Binds = [(LocalId, Occ)]
 
 data DecisionTree
-   = DTLeaf Int
+   = DTLeaf Int Binds
    | DTFail
-   | DTSwitch [(Con, DecisionTree)] (Maybe DecisionTree)
+   | DTSwitch Occ [(Con, DecisionTree)] (Maybe DecisionTree)
    | DTSwap Int DecisionTree
-   deriving (Eq, Show)
+   deriving Show
 
-compilePatterns :: PatMatrix -> DecisionTree
-compilePatterns pm
+compilePatterns :: [Occ] -> PatMatrix -> DecisionTree
+compilePatterns occs pm
    | null pm = DTFail
-   | pm 
-      |> head 
-      |> rowContainsWildcardOnly = 
-         let action = pm |> head |> rowAction
-         in DTLeaf action
+   | rowIsUndoubted (head pm) =
+      let Row pats binds action = head pm
+          binds' = binds ++ [(lid, occ) | (PVar lid, occ) <- zip pats occs]
+      in DTLeaf action binds'
 
    | otherwise =
-      let Row firstPats _ = head pm
+      let Row firstPats _ _ = head pm
           i = fromJust (findIndex isCon firstPats)
       in if i == 0 then
          let headCons = patMatrixHeadCons pm
@@ -31,110 +38,114 @@ compilePatterns pm
              -- completeness, so that default value doesn't
              -- fall into Nothing
              complete = length headCons == (head headCons).span
-             def 
+             def
                | complete = Nothing
-               | otherwise = Just (compilePatterns (defaultD pm))
+               | otherwise = Just (compilePatterns (tail occs) (defaultD (head occs) pm))
              caseList = headCons
-               |> map (\con -> 
-                     let pmSpecialized = specializeS con pm
-                     in (con, compilePatterns pmSpecialized)
+               |> map (\con ->
+                     let pmSpecialized = specializeS (head occs) con pm
+                         occs' = [occField (head occs) k | k <- [0 .. con.arity - 1]] ++ tail occs
+                     in (con, compilePatterns occs' pmSpecialized)
                   )
-         in DTSwitch caseList def
+         in DTSwitch (head occs) caseList def
       else
          let pmSwapped = patMatrixSwap i pm
-         in DTSwap i (compilePatterns pmSwapped)
+             occsSwapped = swapElements 0 i occs
+         in DTSwap i (compilePatterns occsSwapped pmSwapped)
 
 data Con = Con
-   { name  :: Ident
-   , arity :: Int
-   , span  :: Int
-   } deriving (Eq, Ord, Show)
+   { tag      :: KirTag
+   , arity    :: Int
+   , span     :: Int
+   , fieldTys :: [Type]
+   } deriving Show
+
+instance Eq Con where
+   (==) :: Con -> Con -> Bool
+   a == b = a.tag == b.tag
 
 data Pat
    = PWildCard
+   | PVar LocalId
    | PCon Con [Pat]
-   deriving (Eq, Ord, Show)
+   deriving (Eq, Show)
 
 patCon :: Pat -> Maybe Con
-patCon PWildCard = Nothing
 patCon (PCon con _) = Just con
+patCon _ = Nothing
 
 isCon :: Pat -> Bool
 isCon = isJust . patCon
 
-data Row = Row [Pat] Int
+isWild :: Pat -> Bool
+isWild = not . isCon
 
-rowAction :: Row -> Int
-rowAction (Row _ a) = a
+data Row = Row [Pat] Binds Int
 
-rowContainsWildcardOnly :: Row -> Bool
-rowContainsWildcardOnly (Row pats _) = pats
-   |> filter (/= PWildCard)
-   |> null
+rowIsUndoubted :: Row -> Bool
+rowIsUndoubted (Row pats _ _) = all isWild pats
 
 rowHeadIs :: Con -> Row -> Bool
-rowHeadIs conA (Row (PCon conB _ : _) _) = conA == conB
+rowHeadIs conA (Row (PCon conB _ : _) _ _) = conA == conB
 rowHeadIs _ _ = False
 
-rowHeadIsWildcard :: Row -> Bool
-rowHeadIsWildcard (Row (PWildCard : _) _) = True
-rowHeadIsWildcard _ = False
+rowHeadIsWild :: Row -> Bool
+rowHeadIsWild (Row (p : _) _ _) = isWild p
+rowHeadIsWild _ = False
+
+headBinds :: Occ -> Row -> Binds
+headBinds occ (Row (PVar lid : _) binds _) = binds ++ [(lid, occ)]
+headBinds _ (Row _ binds _) = binds
 
 type PatMatrix = [Row]
 
 patMatrixSwap :: Int -> PatMatrix -> PatMatrix
 patMatrixSwap index = map swapRow
    where
-      swapRow :: Row -> Row
-      swapRow (Row pats n) = Row (swapElements 0 index pats) n
+      swapRow (Row pats binds n) = Row (swapElements 0 index pats) binds n
 
-      swapElements :: Int -> Int -> [a] -> [a]
-      swapElements i j xs
-         | i == j = xs
-         | i < 0 || j < 0 || i >= length xs || j >= length xs = 
-            unreachableWith "row swapped indices cannot be out of bounds"
-         | otherwise =
-            let a = xs !! i
-                b = xs !! j
-            in replace i b (replace j a xs)
-
+swapElements :: Int -> Int -> [a] -> [a]
+swapElements i j xs
+   | i == j = xs
+   | i < 0 || j < 0 || i >= length xs || j >= length xs =
+      unreachableWith "row swapped indices cannot be out of bounds"
+   | otherwise =
+      let a = xs !! i
+          b = xs !! j
+      in replace i b (replace j a xs)
+   where
       replace :: Int -> a -> [a] -> [a]
       replace _ _ [] = []
-      replace 0 x (_:xs) = x : xs
-      replace i x (y:ys) = y : replace (i - 1) x ys
+      replace 0 x (_:ys) = x : ys
+      replace k x (y:ys) = y : replace (k - 1) x ys
 
 patMatrixHeadCons :: PatMatrix -> [Con]
 patMatrixHeadCons pm = pm
-   |> map (\(Row pats _) -> pats |> head |> patCon)
+   |> map (\(Row pats _ _) -> pats |> head |> patCon)
    |> catMaybes
-   |> S.fromList
-   |> S.toList
+   |> nub
 
-specializeS :: Con -> PatMatrix -> PatMatrix
-specializeS con = mapMaybe (specializeRow con)
+specializeS :: Occ -> Con -> PatMatrix -> PatMatrix
+specializeS occ con = mapMaybe (specializeRow occ con)
 
-specializeRow :: Con -> Row -> Maybe Row
-specializeRow con row@(Row pats0 index)
-  | rowHeadIs con row = 
-      let rowHead = head pats0
-          pats1 = case rowHead of
+specializeRow :: Occ -> Con -> Row -> Maybe Row
+specializeRow occ con row@(Row pats0 _ index)
+  | rowHeadIs con row =
+      let pats1 = case head pats0 of
             PCon _ args -> args
             _ -> unreachableWith "head must be a constructor"
-          pats2 = pats1 ++ tail pats0
+      in Just (Row (pats1 ++ tail pats0) (headBinds occ row) index)
 
-      in Just (Row pats2 index)
-
-  | rowHeadIsWildcard row = 
+  | rowHeadIsWild row =
       let pats1 = replicate con.arity PWildCard
-          pats2 = pats1 ++ tail pats0
-      in Just (Row pats2 index)
-      
+      in Just (Row (pats1 ++ tail pats0) (headBinds occ row) index)
+
   | otherwise = Nothing
 
-defaultD :: PatMatrix -> PatMatrix
-defaultD = mapMaybe defaultRow
+defaultD :: Occ -> PatMatrix -> PatMatrix
+defaultD occ = mapMaybe (defaultRow occ)
 
-defaultRow :: Row -> Maybe Row
-defaultRow row@(Row pats0 index)
-   | rowHeadIsWildcard row = Just (Row (tail pats0) index)
+defaultRow :: Occ -> Row -> Maybe Row
+defaultRow occ row@(Row pats0 _ index)
+   | rowHeadIsWild row = Just (Row (tail pats0) (headBinds occ row) index)
    | otherwise = Nothing

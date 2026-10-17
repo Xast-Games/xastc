@@ -5,18 +5,21 @@ import Control.Monad.Identity (Identity)
 import Data.Text (pack)
 
 import Xast.Lowerer.Types
+import Control.Monad.Writer (WriterT (runWriterT))
 
 type Lowerer =
-   StateT
-      LowerState
-      Identity
+   WriterT [KirTypeDef]
+      ( StateT
+         LowerState
+         Identity
+      )
 
 runLowerer 
    :: LowerState 
    -> Lowerer a 
-   -> Identity (a, LowerState)
+   -> Identity ((a, [KirTypeDef]), LowerState)
 runLowerer state lowerer =
-   runStateT lowerer state
+   runStateT (runWriterT lowerer) state
 
 freshKirName :: Lowerer KirName
 freshKirName = do

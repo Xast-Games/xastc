@@ -150,7 +150,7 @@ newtype LocalId = LocalId Int
 newtype FunctionId = FunctionId Int
    deriving (Eq, Show)
 newtype ConstructorId = ConstructorId Int
-   deriving (Eq, Show)
+   deriving (Eq, Ord, Show)
 newtype ExternId = ExternId Int
    deriving (Eq, Show)
 
@@ -546,12 +546,12 @@ data Type
    | TyVar Int          -- t0, t3
    | TyInt TyIntrinsic  -- number, concatenative
    | TyInvalid          -- <invalid>
-   deriving (Eq, Show)
+   deriving (Eq, Ord, Show)
 
 data TyIntrinsic
    = TyNumber
    | TyConcat
-   deriving (Eq, Show)
+   deriving (Eq, Ord, Show)
 
 typename :: Type -> String
 typename (TyGnr ident) = show ident

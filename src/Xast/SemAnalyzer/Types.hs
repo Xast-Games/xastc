@@ -10,6 +10,7 @@ import Xast.Utils.Compiler (Target)
 data AnalysisResult = AnalysisResult
    { warningsCount :: Int
    , progs         :: [Program Desugared]
+   , ctorSpans     :: M.Map ConstructorId Int
    }
 
 data Env = Env

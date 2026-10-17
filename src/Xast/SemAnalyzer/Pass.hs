@@ -69,7 +69,29 @@ fullAnalysis reportWarnings saveFile progs target = do
    return $ AnalysisResult
       { warningsCount = warningsCount
       , progs = progsDesugared
+      , ctorSpans = collectCtorSpans st6
       }
+
+-- | Number of constructors of the owning type for every constructor id
+-- (`maxBound` for non-exhaustive types), used by the decision tree compiler.
+collectCtorSpans :: SymTable -> M.Map ConstructorId Int
+collectCtorSpans st = M.fromList
+   [ (cid, spanOf modInfo sig.owner)
+   | modInfo <- M.elems st.modules
+   , sym <- M.elems modInfo.symbols
+   , (cid, sig) <- case sym of
+         SymbolCtor _ c s       -> [(c, s)]
+         SymbolTypeCtor _ _ c s -> [(c, s)]
+         _                      -> []
+   ]
+   where
+      spanOf modInfo owner = case M.lookup owner modInfo.symbols of
+         Just (SymbolType _ ts)         -> tsSpan ts
+         Just (SymbolTypeCtor _ ts _ _) -> tsSpan ts
+         _                              -> maxBound
+      tsSpan ts
+         | ts.nonExhaustive = maxBound
+         | otherwise        = S.size ts.ctors
 
 -- #### DECLARE STATEMENTS ####
 
@@ -1431,7 +1453,8 @@ inferPattern imps ty p = case p of
             let ps' = map fst inferred
             pure (PatCon (TypedInfo loc TyInvalid mRes) ctorIdent ps', M.empty)
 
-         Just sym@(SymbolCtor {}) -> do
+         Just sym@(SymbolCtor _ cid _) -> do
+            let mRes' = Just (ResConstructor cid)
             resultTy <- ctorType loc sym
             let (expectedFieldTys, ctorResultTy) = case resultTy of
                   TyFn args r -> (args, r)
@@ -1444,11 +1467,11 @@ inferPattern imps ty p = case p of
                   errSem (SECtorArityMismatch loc ctorIdent (length expectedFieldTys) (length ps))
                   inferred <- mapM (inferPattern imps TyInvalid) ps
                   let ps' = map fst inferred
-                  pure (PatCon (TypedInfo loc ctorResultTy mRes) ctorIdent ps', M.empty)
+                  pure (PatCon (TypedInfo loc ctorResultTy mRes') ctorIdent ps', M.empty)
                else do
                   inferred <- zipWithM (inferPattern imps) expectedFieldTys ps
                   let (ps', varMaps) = unzip inferred
-                  pure (PatCon (TypedInfo loc ctorResultTy mRes) ctorIdent ps', M.unions varMaps)
+                  pure (PatCon (TypedInfo loc ctorResultTy mRes') ctorIdent ps', M.unions varMaps)
 
          Just invalid ->
             unreachableWith $ "Invalid constructor symbol at " ++ show loc ++ ": " ++ show invalid

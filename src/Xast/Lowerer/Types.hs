@@ -2,19 +2,52 @@ module Xast.Lowerer.Types where
 
 import Xast.AST
 import Data.Text (Text)
+import qualified Data.Map as M
 
-newtype LowerState = LowerState
+data LowerState = LowerState
    { nameSupply :: Int
+   , typeTmpls  :: M.Map Ident TypeDef
+   , typeInsts  :: M.Map TypeInst KirName
+   , typeQueue  :: [TypeInst]
+   , ctorSpans  :: M.Map ConstructorId Int
    }
 
-emptyLowerState :: LowerState
-emptyLowerState = LowerState { nameSupply = 0 }
+data TypeInst = TypeInst
+   { name :: Ident
+   , args :: [Type]
+   }
+   deriving (Eq, Ord, Show)
+
+newLowerState 
+   :: M.Map ConstructorId Int 
+   -> [Program Desugared]
+   -> LowerState
+newLowerState spans progs = LowerState 
+   { nameSupply   = 0
+   , ctorSpans    = spans
+   , typeTmpls    = M.fromList
+      [ (td.name, td) | p <- progs, StmtTypeDef td <- p.stmts ] 
+   , typeInsts    = M.empty
+   , typeQueue    = []
+   }
 
 -- KIRA = Khast Intermediate RepresentAtion
 data Kira = Kira
    { moduleName :: Module
-   , systems :: [KirSystem]
-   , functions :: [KirFunction]
+   , systems    :: [KirSystem]
+   , functions  :: [KirFunction]
+   }
+   deriving Show
+
+data KirTypeDef = KirTypeDef
+   { name  :: KirName
+   , ctors :: [KirCtor]
+   }
+   deriving Show
+
+data KirCtor = KirCtor 
+   { name   :: Ident
+   , fields :: [Type]
    }
    deriving Show
 
@@ -57,7 +90,7 @@ data KirBranch = KirBranch
 data KirTag
    = TagLit Literal
    | TagCtor Ident
-   deriving Show
+   deriving (Eq, Show)
 
 data KirMatchArm = KirMatchArm
    { tag    :: KirTag
@@ -68,6 +101,14 @@ data KirMatchArm = KirMatchArm
 data KirInstruct
    = KirCall Type KirName [KirValue] KirName
    | KirAssign KirBindingId KirValue
+   | KirStore Type KirDest KirValue 
+   | KirField 
+      { ty     :: Type 
+      , src    :: KirValue
+      , ctor   :: Ident 
+      , plIdx  :: Int 
+      , out    :: KirName
+      }
    | KirMatch
       { ty         :: Type
       , scrutinee  :: KirValue
