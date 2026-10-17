@@ -13,13 +13,26 @@ import Xast.AST (moduleToPath, IntLiteral(..), Literal(..), Type(..), Ident(..),
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Maybe (fromMaybe, isJust)
+import Control.Monad.Reader (MonadReader(ask))
 
-codegen :: [Kira] -> [CProgram]
-codegen kira =
-   let generated = forM kira codegenOne
-       c = runIdentity $
-         runCodegen generated
-   in c
+codegen 
+   :: [Kira] 
+   -> [KirTypeDef]
+   -> [CProgram]
+codegen kira typeDefs = 
+   let generated = do
+         types    <- codegenTypeDefs
+         programs <- forM kira codegenOne
+         return (types : programs)
+   in runIdentity (runCodegen generated typeDefs)
+
+codegenTypeDefs :: CCodegen CProgram  
+codegenTypeDefs = do
+   types <- ask
+   decls <- forM types $ \td ->
+      if 
+
+   undefined
 
 codegenOne :: Kira -> CCodegen CProgram
 codegenOne kira = do
@@ -179,9 +192,9 @@ literalToExpr (LitFloat f) = CFloatLit (realToFrac f)
 literalToExpr lit          = todo__ ("no C representation for literal " ++ show lit)
 
 typeToCType :: Type -> CType
-typeToCType (TyCon (Ident "Int"))   = CInt
-typeToCType (TyCon (Ident "Float")) = CFloat
-typeToCType (TyCon (Ident "Long"))  = CLong
--- Temporary
-typeToCType (TyCon (Ident "Bool"))  = CStruct "Bool"
-typeToCType ty = todo__ ("no C representation for type " ++ typename ty)
+typeToCType = \case
+   TyCon (Ident "Int")   -> CInt
+   TyCon (Ident "Float") -> CFloat
+   TyCon (Ident "Long")  -> CLong
+   TyCon name            -> CStruct name.inner
+   other                 -> todo__ ("no C representation for type " ++ typename other)

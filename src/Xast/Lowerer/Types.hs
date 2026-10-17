@@ -3,6 +3,7 @@ module Xast.Lowerer.Types where
 import Xast.AST
 import Data.Text (Text)
 import qualified Data.Map as M
+import Xast.Utils.Generic ((|>))
 
 data LowerState = LowerState
    { nameSupply :: Int
@@ -44,6 +45,21 @@ data KirTypeDef = KirTypeDef
    , ctors :: [KirCtor]
    }
    deriving Show
+
+isUnitStruct :: KirTypeDef -> Bool
+isUnitStruct td = case td.ctors of
+   [single] -> null single.fields
+   _        -> False
+
+isEnum :: KirTypeDef -> Bool
+isEnum td = td.ctors
+   |> filter (\ctor -> not $ null ctor.fields)
+   |> null
+
+isPlainStruct :: KirTypeDef -> Bool
+isPlainStruct td = case td.ctors of
+   [single] -> not $ null single.fields
+   _        -> False
 
 data KirCtor = KirCtor 
    { name   :: Ident

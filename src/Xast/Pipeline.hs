@@ -90,10 +90,10 @@ runCompile_ dir = runExceptT $ do
       Right res -> return (res.warningsCount, res.progs, res.ctorSpans)
 
    -- Lowering AST into KIRA
-   let (loweredIR, _typeDefs) = lowerPrograms ctorSpans progsAnalyzed
+   let (loweredIR, typeDefs) = lowerPrograms ctorSpans progsAnalyzed
 
    -- Generating C
-   let generatedC = codegen loweredIR
+   let generatedC = codegen loweredIR typeDefs
 
    -- Temporarily print C programs as debug
    ----------------------------------------

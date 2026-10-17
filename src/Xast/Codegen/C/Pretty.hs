@@ -6,6 +6,7 @@ import Xast.Codegen.C.Types
 import Prettyprinter (Doc, Pretty (pretty), hardline, (<+>), encloseSep, vsep, indent, enclose)
 import Xast.Utils.Pretty (bold, cyan)
 import Data.List (intercalate)
+import Data.Text (Text)
 
 debugPrograms :: [CProgram] -> String
 debugPrograms progs = intercalate "\n\n" $ flip map progs $ \prog ->
@@ -26,6 +27,59 @@ prettyProgram prog =
 prettyDecl :: CDecl -> Doc ann
 prettyDecl (CFunc func) = prettyFunction func <> hardline
 prettyDecl (CGlob glob) = prettyGlobal glob <> hardline
+prettyDecl (CStructDef struct) = prettyStructDef struct <> hardline
+prettyDecl (CEnumDef enum) = prettyEnumDef enum <> hardline
+prettyDecl (CTaggedUnionDef taggedUnion) = prettyTaggedUnionDef taggedUnion <> hardline
+
+prettyTaggedUnionDef :: CTaggedUnionDefinition -> Doc ann
+prettyTaggedUnionDef taggedUnion = 
+   "typedef struct" <+>
+   vsep
+      [ "{"
+      , indent 4 (prettyType taggedUnion.tagType <+> "tag;")
+      , hardline
+      , indent 4 (prettyUnion taggedUnion.unionTypes)
+      , "}"
+      ] <+>
+   pretty taggedUnion.name <> ";"
+
+prettyUnion :: [(Text, CType)] -> Doc ann
+prettyUnion unionTypes = 
+   "union" <+>
+   vsep
+      [ "{"
+      , indent 4 (vsep (map prettyField unionTypes))
+      , "}"
+      ] <+>
+   "data;"
+
+prettyEnumDef :: CEnumDefinition -> Doc ann
+prettyEnumDef enum = 
+   "typedef enum" <+>
+   vsep 
+      [ "{"
+      , indent 4 (vsep (map prettyEnumVariant enum.variants))
+      , "}"
+      ] <+>
+   pretty enum.name <> ";"
+
+prettyEnumVariant :: Text -> Doc ann
+prettyEnumVariant variant = 
+   pretty variant <> ","
+
+prettyStructDef :: CStructDefinition -> Doc ann
+prettyStructDef struct = 
+   "typedef struct" <+>
+   vsep 
+      [ "{"
+      , indent 4 (vsep (map prettyField struct.fields))
+      , "}"
+      ] <+>
+   pretty struct.name <> ";"
+
+prettyField :: (Text, CType) -> Doc ann
+prettyField (name, ty) = 
+   prettyType ty <+> pretty name <> ";"
 
 prettyFunction :: CFunction -> Doc ann
 prettyFunction func = 

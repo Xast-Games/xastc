@@ -6,6 +6,7 @@ import Xast.AST
 import qualified Data.Map as M
 import qualified Data.Text as T
 import Data.Text (Text)
+import Text.Read (readMaybe)
 import Control.Monad (forM, unless)
 import Control.Monad.State (gets, modify)
 import Control.Monad.Writer (tell)
@@ -44,7 +45,13 @@ monoType t = case splitApp t of
          pure (TyCon (identFromKirName nm))
 
    _ -> case t of
-      TyTuple ts -> TyTuple <$> mapM monoType ts
+      TyTuple [single] -> monoType single
+      TyTuple elementTypes@(_ : _) -> do
+         mapM_ monoType elementTypes
+         let tupleInst = TypeInst (tupleName (length elementTypes)) elementTypes
+         tupleKirName <- requestType tupleInst
+         return $ TyCon (identFromKirName tupleKirName)
+
       TyFn ps r  -> TyFn <$> mapM monoType ps <*> monoType r
       _          -> pure t
 
@@ -69,7 +76,34 @@ drainTypes = gets (.typeQueue) >>= \case
       drainTypes
 
 buildTypeDef :: TypeInst -> Lowerer KirTypeDef
-buildTypeDef inst = do
+buildTypeDef inst = case tupleArity inst.name of
+   Just arity -> buildTupleDef arity inst
+   Nothing    -> buildUserTypeDef inst
+
+buildTupleDef :: Int -> TypeInst -> Lowerer KirTypeDef
+buildTupleDef arity inst = do
+   unless (length inst.args == arity) $
+      error ("wrong number of elements for tuple type " ++ show inst.name)
+
+   fieldTypes <- mapM monoType inst.args
+   let mangledName = mangle inst
+   let ctor = KirCtor { name = Ident mangledName, fields = fieldTypes }
+
+   return KirTypeDef
+      { name  = KirName mangledName
+      , ctors = [ctor]
+      }
+
+tupleName :: Int -> Ident
+tupleName arity = Ident ("tup" <> tshow arity)
+
+tupleArity :: Ident -> Maybe Int
+tupleArity name = do
+   digits <- T.stripPrefix "tup" name.inner
+   readMaybe (T.unpack digits)
+
+buildUserTypeDef :: TypeInst -> Lowerer KirTypeDef
+buildUserTypeDef inst = do
    tpl <- gets (M.lookup inst.name . (.typeTmpls)) >>= \case
       Just tpl -> pure tpl
       Nothing  -> error ("no template for type " ++ show inst.name)
@@ -109,7 +143,7 @@ mangleArg t = case splitApp t of
    (TyCon i, [])   -> i.inner
    (TyCon i, args) -> wrap (mangle (TypeInst i args))
    _ -> case t of
-      TyTuple ts -> wrap (joinToken ("tup" <> tshow (length ts)) ts)
+      TyTuple ts -> wrap (mangle (TypeInst (tupleName (length ts)) ts))
       TyFn ps r  -> wrap (joinToken ("fn"  <> tshow (length ps)) (ps ++ [r]))
       _          -> error ("mangling: unexpected type " ++ show t)
 

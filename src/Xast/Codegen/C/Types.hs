@@ -9,8 +9,34 @@ data CProgram = CProgram
    deriving Show
 
 data CDecl 
-   = CFunc CFunction
+   = CUnitDef CUnitDefinition
+   | CStructDef CStructDefinition
+   | CTaggedUnionDef CTaggedUnionDefinition
+   | CEnumDef CEnumDefinition
+   | CFunc CFunction
    | CGlob CGlobal
+   deriving Show
+
+data CUnitDefinition
+   deriving Show
+
+data CTaggedUnionDefinition = CTaggedUnionDefinition
+   { name         :: Text
+   , tagType      :: CType             -- tag
+   , unionTypes   :: [(Text, CType)]  -- data
+   }
+   deriving Show
+
+data CStructDefinition = CStructDefinition
+   { name   :: Text
+   , fields :: [(Text, CType)]
+   }
+   deriving Show
+
+data CEnumDefinition = CEnumDefinition
+   { name      :: Text
+   , variants  :: [Text]
+   }
    deriving Show
 
 data CFunction = CFunction
