@@ -7,9 +7,10 @@ import Prettyprinter (Doc, Pretty (pretty), hardline, (<+>), encloseSep, vsep, i
 import Xast.Utils.Pretty (bold, cyan)
 import Data.List (intercalate)
 import Data.Text (Text)
+import qualified Xast.Utils.List as L
 
 debugPrograms :: [CProgram] -> String
-debugPrograms progs = intercalate "\n\n" $ flip map progs $ \prog ->
+debugPrograms progs = intercalate "\n\n" $ L.forEach progs $ \prog ->
    let path = show $ bold $ cyan prog.path
        code = show $ prettyProgram prog
    in path ++ ":\n" ++ code

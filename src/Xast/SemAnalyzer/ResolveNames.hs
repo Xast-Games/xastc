@@ -1,11 +1,9 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.ResolveNames where
 
 import Control.Monad.State
 import Control.Monad (forM_, forM)
-import Data.Maybe (mapMaybe)
 import qualified Data.Map as M
 import Xast.AST
 import Xast.Error.Types
@@ -15,6 +13,7 @@ import Xast.SemAnalyzer.Query
 import Text.Megaparsec (SourcePos(sourceName))
 import Control.Applicative ((<|>))
 import Xast.SemAnalyzer.Unify (freshLocalScope)
+import qualified Xast.Utils.List as L
 
 -- #### RESOLVE NAMES ####
 resolveNames :: Program Parsed -> SemAnalyzer (Program Resolved)
@@ -57,7 +56,7 @@ resolveDefImplMatches stmts = go stmts stmts
    where
       go (x:xs) allStmts = case x of
          StmtFunc (FnImpl (FuncImpl impLoc impIdent _ _)) ->
-            let matching = flip mapMaybe allStmts $ \case
+            let matching = L.forMaybe allStmts $ \case
                   StmtFunc (FnDef (FuncDef defLoc _ defIdent _ _)) ->
                      if defIdent == impIdent then
                         Just defLoc
@@ -86,7 +85,7 @@ resolveDefImplMatches stmts = go stmts stmts
                go xs allStmts
 
          StmtSystem (SysImpl (SystemImpl impLoc impIdent _ _ _)) ->
-            let matching = flip mapMaybe allStmts $ \case
+            let matching = L.forMaybe allStmts $ \case
                   StmtSystem (SysDef (SystemDef defLoc _ defIdent _ _ _)) ->
                      if defIdent == impIdent then
                         Just defLoc

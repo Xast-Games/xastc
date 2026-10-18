@@ -13,6 +13,7 @@ import Toml (prettyTomlDecodeError)
 import Xast.Error.Types
 import Xast.AST
 import Xast.Utils.Pretty 
+import qualified Xast.Utils.List as L
 
 instance HasHints Void String where
    hints :: Void -> [Note String]
@@ -516,7 +517,7 @@ printWarning (SWRedundantImport intr) = case intr of
       in printReportAt filename report
 
    InterSelect module_ xs -> unless (null xs) $
-      let dat = flip map xs $
+      let dat = L.forEach xs $
             \(Located loc ident) ->
                let Location pos _ len = loc
                    fname = sourceName pos

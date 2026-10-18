@@ -42,7 +42,7 @@ monoType t = case splitApp t of
       else do
          mapM_ monoType args
          nm <- requestType (TypeInst n args)
-         pure (TyCon (identFromKirName nm))
+         pure (TyCon (Ident nm.text))
 
    _ -> case t of
       TyTuple [single] -> monoType single
@@ -50,7 +50,7 @@ monoType t = case splitApp t of
          mapM_ monoType elementTypes
          let tupleInst = TypeInst (tupleName (length elementTypes)) elementTypes
          tupleKirName <- requestType tupleInst
-         return $ TyCon (identFromKirName tupleKirName)
+         return $ TyCon (Ident tupleKirName.text)
 
       TyFn ps r  -> TyFn <$> mapM monoType ps <*> monoType r
       _          -> pure t
@@ -131,9 +131,6 @@ ctorResultTy :: Type -> Type
 ctorResultTy = \case
    TyFn _ r -> r
    t        -> t
-
-identFromKirName :: KirName -> Ident
-identFromKirName (KirName t) = Ident t
 
 mangle :: TypeInst -> Text
 mangle inst = T.intercalate "_" (inst.name.inner : map mangleArg inst.args)

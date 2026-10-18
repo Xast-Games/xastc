@@ -67,8 +67,8 @@ data KirCtor = KirCtor
    }
    deriving Show
 
-newtype KirName = KirName Text
-   deriving Show
+newtype KirName = KirName { text :: Text }
+   deriving (Eq, Ord, Show)
 
 data KirSystem = KirSystem
    { name :: KirName

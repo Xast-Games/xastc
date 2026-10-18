@@ -11,6 +11,7 @@ import Data.Function (on)
 import qualified Data.Text as T
 import Xast.SemAnalyzer.Exhaustive (checkClausesExhaustive)
 import Xast.SemAnalyzer.Unify (freshLocalId)
+import qualified Xast.Utils.List as L
 
 -- #### Desugaring ####
 
@@ -52,7 +53,7 @@ desugarFn group = do
 
    -- Tuple patterns and bodies
    let tupleAnn = DesugaredInfo {res = Nothing, ty = TyTuple argTypes}
-   let patBodies = flip map group $ \i ->
+   let patBodies = L.forEach group $ \i ->
          ( PatTuple tupleAnn $ map (fmap desugaredAnn) i.args
          , fmap desugaredAnn i.body
          )
@@ -64,7 +65,7 @@ desugarFn group = do
    let typedArgs = zip3 ids names argTypes
 
    -- Base expression
-   let baseExpr = ExpTuple tupleAnn $ flip map typedArgs $ \(lid, name, ty) ->
+   let baseExpr = ExpTuple tupleAnn $ L.forEach typedArgs $ \(lid, name, ty) ->
          ExpVar DesugaredInfo {res = Just (ResLocal lid), ty = ty} Nothing name
 
    -- Generate match
@@ -95,7 +96,7 @@ desugarSys group = do
 
    -- Tuple patterns and bodies
    let tupleAnn = DesugaredInfo {res = Nothing, ty = TyTuple argTypes}
-   let patBodies = flip map group $ \i ->
+   let patBodies = L.forEach group $ \i ->
          ( PatTuple tupleAnn $ map (fmap desugaredAnn) (flattenClause i)
          , fmap desugaredAnn i.body
          )
@@ -105,7 +106,7 @@ desugarSys group = do
    let typedArgs = zipWith (\(lid, name) ty -> (lid, name, ty)) args argTypes
 
    -- Base expression
-   let baseExpr = ExpTuple tupleAnn $ flip map typedArgs $ \(lid, name, ty) ->
+   let baseExpr = ExpTuple tupleAnn $ L.forEach typedArgs $ \(lid, name, ty) ->
          ExpVar DesugaredInfo {res = Just (ResLocal lid), ty = ty} Nothing name
 
    -- Generate match

@@ -62,6 +62,7 @@ library
         Xast.Lowerer.Expr,
         Xast.Lowerer.DecisionTree,
         Xast.Lowerer.Mono,
+        Xast.Lowerer.EraseZero,
 
         Xast.Codegen.C.Monad,
         Xast.Codegen.C.Types,

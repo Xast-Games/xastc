@@ -3,7 +3,7 @@ module Xast.SemAnalyzer.Imports where
 
 import Control.Monad.State
 import Control.Monad (forM_, unless, when, foldM)
-import Data.Maybe (mapMaybe, fromJust)
+import Data.Maybe (fromJust)
 import Data.List (sortBy)
 import Data.Foldable (foldl')
 import qualified Data.Set as S
@@ -208,10 +208,10 @@ resolveInvalidExports (Program (ModuleDef _ m (Located loc exps)) _ _ _) =
 
 resolveRedundantImports :: Program Parsed -> SemAnalyzer ()
 resolveRedundantImports (Program _ imports _ _) =
-   when (length imports >= 2) $
-      let intr = mapMaybe (uncurry intersectImport) (pairs imports)
-      in forM_ intr $
-         \i -> warnSem (SWRedundantImport i)
+   when (length imports >= 2) $ do
+      forM_ (pairs imports) $ \i -> case uncurry intersectImport i of
+         Just redundant -> warnSem (SWRedundantImport redundant)
+         Nothing        -> return ()
 
 resolveCyclicImports :: [Program Parsed] -> SemAnalyzer ()
 resolveCyclicImports progs = do

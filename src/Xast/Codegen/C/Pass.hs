@@ -29,8 +29,8 @@ codegen kira typeDefs =
 codegenTypeDefs :: CCodegen CProgram  
 codegenTypeDefs = do
    types <- ask
-   decls <- forM types $ \td ->
-      if 
+   -- decls <- forM types $ \td ->
+      -- if 
 
    undefined
 

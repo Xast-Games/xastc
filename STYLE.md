@@ -129,3 +129,22 @@
 
     ```
 
+7. For nested loops or loops with big lambdas use `forEach` instead of `map`, forMaybe instead of `mabMaybe` and `forFlat` instead of `concatMap`:
+
+    **BAD:**
+    ```haskell
+    concatMap (\container -> 
+        mapMaybe (\field -> 
+            fmap (, container.name) (fieldTypeName field)
+        ) 
+        (head container.ctors).fields
+    ) 
+    candidates
+    ```
+
+    **GOOD:**
+    ```haskell
+    L.forFlat candidates $ \container ->
+        L.forMaybe (head container.ctors).fields $ \field ->
+            fmap (, container.name) (fieldTypeName field)
+    ```
