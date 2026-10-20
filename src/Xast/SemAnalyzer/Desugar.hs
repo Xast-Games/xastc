@@ -12,37 +12,38 @@ import qualified Data.Text as T
 import Xast.SemAnalyzer.Exhaustive (checkClausesExhaustive)
 import Xast.SemAnalyzer.Unify (freshLocalId)
 import qualified Xast.Utils.List as L
+import Xast.Utils.Generic ((|>))
 
 -- #### Desugaring ####
 
 desugarProgram :: Program Typed -> SemAnalyzer (Program Desugared)
-desugarProgram prog = do
-   let notImpl = [desugaredAnn <$> x | x <- prog.stmts, isNotImpl x]
+desugarProgram program = do
+   let nonImplStmts = [desugaredAnn <$> stmt | stmt <- program.stmts, isNotImpl stmt]
 
    -- Functions
-   let fmImpls = [x | StmtFunc (FnImpl x) <- prog.stmts]
+   let functionImpls = [funcImpl | StmtFunc (FnImpl funcImpl) <- program.stmts]
    let fnGroups =
          groupBy ((==) `on` (.name))
-            $ sortOn (.name) fmImpls
+            $ sortOn (.name) functionImpls
    desugaredFns <- forM fnGroups desugarFn
 
    -- Systems
-   let sysImpls = [x | StmtSystem (SysImpl x) <- prog.stmts]
+   let systemImpls = [systemImpl | StmtSystem (SysImpl systemImpl) <- program.stmts]
    let sysGroups =
          groupBy ((==) `on` (.name))
-            $ sortOn (.name) sysImpls
+            $ sortOn (.name) systemImpls
    desugaredSystems <- forM sysGroups desugarSys
 
    -- Combine stmts
-   let combinedStmts = notImpl
+   let combinedStmts = nonImplStmts
          <> fmap (StmtFunc . FnImpl) desugaredFns
          <> fmap (StmtSystem . SysImpl) desugaredSystems
 
    return $ Program
-      prog.moduleDef
-      prog.imports
+      program.moduleDef
+      program.imports
       combinedStmts
-      prog.src
+      program.src
 
 desugarFn :: [FuncImpl Typed] -> SemAnalyzer (FuncImpl Desugared)
 desugarFn group = do
@@ -53,24 +54,24 @@ desugarFn group = do
 
    -- Tuple patterns and bodies
    let tupleAnn = DesugaredInfo {res = Nothing, ty = TyTuple argTypes}
-   let patBodies = L.forEach group $ \i ->
-         ( PatTuple tupleAnn $ map (fmap desugaredAnn) i.args
-         , fmap desugaredAnn i.body
+   let patBodies = L.forEach group $ \impl ->
+         ( PatTuple tupleAnn $ map (fmap desugaredAnn) impl.args
+         , fmap desugaredAnn impl.body
          )
 
    -- Define args names
-   let argsCnt = length fstImpl.args
-   args <- forM [0..argsCnt] $ const freshParam
+   let argsCount = length fstImpl.args
+   args <- forM [0..argsCount] $ const freshParam
    let (ids, names) = unzip args
    let typedArgs = zip3 ids names argTypes
 
    -- Base expression
-   let baseExpr = ExpTuple tupleAnn $ L.forEach typedArgs $ \(lid, name, ty) ->
-         ExpVar DesugaredInfo {res = Just (ResLocal lid), ty = ty} Nothing name
+   let baseExpr = ExpTuple tupleAnn $ L.forEach typedArgs $ \(localId, name, ty) ->
+         ExpVar DesugaredInfo {res = Just (ResLocal localId), ty = ty} Nothing name
 
    -- Generate match
    let matchExpr = Match baseExpr (map (uncurry MatchWing) patBodies) isExhaustive
-   let retType = (exprAnnotation (snd (head patBodies))).ty
+   let retType = (patBodies |> head |> snd |> exprAnnotation).ty
 
    -- Construct new func impl
    return $ FuncImpl
@@ -84,11 +85,12 @@ desugarSys group = do
    let fstImpl = head group
 
    -- Flatten every entity's component patterns
-   let flattenClause i =
-         concatMap (\(EntityPattern bs) -> map (.pat) bs) i.entities
-            ++ fromMaybe [] i.with
+   let flattenClause impl =
+         L.forFlat impl.entities (\(EntityPattern bindings) -> map (.pat) bindings)
+            ++ fromMaybe [] impl.with
 
-   let entityTypes = concatMap (\(EntityPattern bs) -> map ((.ty) . patAnnotation . (.pat)) bs) fstImpl.entities
+   let entityTypes = L.forFlat fstImpl.entities $ \(EntityPattern bindings) ->
+         bindings |> map (\binding -> binding.pat |> patAnnotation |> (.ty))
    let withTypes = maybe [] (map ((.ty) . patAnnotation)) fstImpl.with
    let argTypes = entityTypes ++ withTypes
 
@@ -96,32 +98,32 @@ desugarSys group = do
 
    -- Tuple patterns and bodies
    let tupleAnn = DesugaredInfo {res = Nothing, ty = TyTuple argTypes}
-   let patBodies = L.forEach group $ \i ->
-         ( PatTuple tupleAnn $ map (fmap desugaredAnn) (flattenClause i)
-         , fmap desugaredAnn i.body
+   let patBodies = L.forEach group $ \impl ->
+         ( PatTuple tupleAnn $ map (fmap desugaredAnn) (flattenClause impl)
+         , fmap desugaredAnn impl.body
          )
 
    -- Define param names, one per flattened position
    args <- forM argTypes $ const freshParam
-   let typedArgs = zipWith (\(lid, name) ty -> (lid, name, ty)) args argTypes
+   let typedArgs = zipWith (\(localId, name) ty -> (localId, name, ty)) args argTypes
 
    -- Base expression
-   let baseExpr = ExpTuple tupleAnn $ L.forEach typedArgs $ \(lid, name, ty) ->
-         ExpVar DesugaredInfo {res = Just (ResLocal lid), ty = ty} Nothing name
+   let baseExpr = ExpTuple tupleAnn $ L.forEach typedArgs $ \(localId, name, ty) ->
+         ExpVar DesugaredInfo {res = Just (ResLocal localId), ty = ty} Nothing name
 
    -- Generate match
    let matchExpr = Match baseExpr (map (uncurry MatchWing) patBodies) isExhaustive
-   let retType = (exprAnnotation (snd (head patBodies))).ty
+   let retType = (patBodies |> head |> snd |> exprAnnotation).ty
 
    -- Rebuild the entity/with shape from `fstImpl`, substituting each
    -- component's pattern with its freshly named param.
    let (entityArgs, withArgs) = splitAt (length entityTypes) typedArgs
 
-   let mkVar (lid, name, ty) = PatVar (DesugaredInfo {res = Just (ResLocal lid), ty = ty}) name
+   let mkVar (localId, name, ty) = PatVar (DesugaredInfo {res = Just (ResLocal localId), ty = ty}) name
 
    let rebuildEntities _ [] = []
-       rebuildEntities avail (EntityPattern bindings : rest) =
-         let (used, remaining) = splitAt (length bindings) avail
+       rebuildEntities available (EntityPattern bindings : rest) =
+         let (used, remaining) = splitAt (length bindings) available
              newBindings = zipWith
                   (\arg binding -> EntPatBinding (mkVar arg) binding.access)
                   used bindings
@@ -140,8 +142,8 @@ desugarSys group = do
 
 freshParam :: SemAnalyzer (LocalId, Ident)
 freshParam = do
-   lid@(LocalId n) <- freshLocalId
-   pure (lid, Ident ("p_" <> T.pack (show n)))
+   localId@(LocalId idNumber) <- freshLocalId
+   pure (localId, Ident ("p_" <> T.pack (show idNumber)))
 
 isNotImpl :: Stmt a -> Bool
 isNotImpl (StmtFunc (FnImpl _)) = False

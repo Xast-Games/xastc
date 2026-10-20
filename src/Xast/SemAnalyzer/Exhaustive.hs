@@ -13,29 +13,29 @@ import Xast.SemAnalyzer.Query
 
 typeHead :: Type -> Maybe Ident
 typeHead = \case
-   TyCon n   -> Just n
-   TyApp t _ -> typeHead t
-   _         -> Nothing
+   TyCon name   -> Just name
+   TyApp func _ -> typeHead func
+   _            -> Nothing
 
 patOf :: MatchWing a -> Pattern a
 patOf (MatchWing pat _) = pat
 
 checkMatchExhaustive :: Location -> Type -> [Pattern Typed] -> SemAnalyzer Bool
-checkMatchExhaustive loc scrutTy pats = case typeHead scrutTy of
+checkMatchExhaustive location scrutineeType patterns = case typeHead scrutineeType of
    Nothing -> pure False
-   Just tyIdent -> do
-      msym <- lookupCurrentModule tyIdent
-      case msym of
+   Just typeName -> do
+      maybeSymbol <- lookupCurrentModule typeName
+      case maybeSymbol of
          Just (SymbolType _ typeSig) | not typeSig.nonExhaustive ->
-            if any isCatchAll pats
+            if any isCatchAll patterns
                then pure True
                else do
-                  let covered = S.fromList [ctorIdent | PatCon _ ctorIdent _ <- pats]
+                  let covered = S.fromList [ctorIdent | PatCon _ ctorIdent _ <- patterns]
                   let missing = S.toList (typeSig.ctors S.\\ covered)
                   if null missing
                      then pure True
                      else do
-                        errSem (SENonExhaustiveMatch loc tyIdent missing)
+                        errSem (SENonExhaustiveMatch location typeName missing)
                         pure False
          _ -> pure False
    where
@@ -44,6 +44,6 @@ checkMatchExhaustive loc scrutTy pats = case typeHead scrutTy of
       isCatchAll _               = False
 
 checkClausesExhaustive :: Location -> [Type] -> [[Pattern Typed]] -> SemAnalyzer Bool
-checkClausesExhaustive loc paramTys clauseArgs = do
-   results <- forM (zip paramTys (transpose clauseArgs)) $ uncurry (checkMatchExhaustive loc)
+checkClausesExhaustive location parameterTypes clauseArgs = do
+   results <- forM (zip parameterTypes (transpose clauseArgs)) $ uncurry (checkMatchExhaustive location)
    pure (and results)

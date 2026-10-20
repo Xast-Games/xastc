@@ -12,21 +12,21 @@ import Control.Monad.Identity (Identity(runIdentity))
 import Xast.Lowerer.Definition (lowerFunction, lowerSystem)
 
 lowerPrograms :: M.Map ConstructorId Int -> [Program Desugared] -> ([Kira], [KirTypeDef])
-lowerPrograms spans progs =
-   let lowered = forM progs lowerProgram <* drainTypes
+lowerPrograms spans programs =
+   let lowered = forM programs lowerProgram <* drainTypes
        ((irs, typeDefs), _) = runIdentity $
-         runLowerer (newLowerState spans progs) lowered
+         runLowerer (newLowerState spans programs) lowered
    in (irs, typeDefs)
 
 lowerProgram :: Program Desugared -> Lowerer Kira
-lowerProgram prog = do
-   let systemImpls = [x | StmtSystem (SysImpl x) <- prog.stmts]
-   let funcImpls   = [x | StmtFunc (FnImpl x) <- prog.stmts]
+lowerProgram program = do
+   let systemImpls = [systemImpl | StmtSystem (SysImpl systemImpl) <- program.stmts]
+   let funcImpls   = [funcImpl | StmtFunc (FnImpl funcImpl) <- program.stmts]
 
-   systems   <- forM systemImpls (lowerSystem prog.moduleDef.name)
-   functions <- forM funcImpls (lowerFunction prog.moduleDef.name)
+   systems   <- forM systemImpls (lowerSystem program.moduleDef.name)
+   functions <- forM funcImpls (lowerFunction program.moduleDef.name)
 
    return $ Kira
-      prog.moduleDef.name
+      program.moduleDef.name
       systems
       functions

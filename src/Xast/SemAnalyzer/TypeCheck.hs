@@ -20,84 +20,84 @@ import Xast.SemAnalyzer.InferPattern (inferPattern)
 import Xast.SemAnalyzer.Unify (typeOf, withType)
 
 typeCheck :: Program Resolved -> SemAnalyzer (Program Typed)
-typeCheck (Program mdl@(ModuleDef _ m _) imps stmts src) = do
-   modify $ \st -> st { currentModule = m }
-   Program mdl imps <$> traverse (typeCheckStmt imps) stmts <-- src
+typeCheck (Program moduleDef@(ModuleDef _ moduleName _) imports statements source) = do
+   modify $ \currentState -> currentState { currentModule = moduleName }
+   Program moduleDef imports <$> traverse (typeCheckStmt imports) statements <-- source
 
 typeCheckStmt :: [Located ImportDef] -> Stmt Resolved -> SemAnalyzer (Stmt Typed)
-typeCheckStmt imps (StmtFunc (FnImpl (FuncImpl implLoc fnIdent pats expr))) = do
-   (FuncSig argTypes retType) <- fromJust <$> lookupCurrentFunction fnIdent
+typeCheckStmt imports (StmtFunc (FnImpl (FuncImpl implLocation functionName patterns expression))) = do
+   (FuncSig argTypes retType) <- fromJust <$> lookupCurrentFunction functionName
 
    -- 0) Check expressions integer bounds
-   checkIntegerBounds expr
+   checkIntegerBounds expression
 
    -- 1) match patterns and args count
-   unless (length pats == length argTypes) $
-      errSem (SEFnArityMismatch implLoc fnIdent (length argTypes) (length pats))
+   unless (length patterns == length argTypes) $
+      errSem (SEFnArityMismatch implLocation functionName (length argTypes) (length patterns))
 
    -- 2) match patterns and args types
-   inferred <- zipWithM (inferPattern imps) argTypes pats
-   let (pats', varMaps) = unzip inferred
-   let patVars = M.unions varMaps
+   inferred <- zipWithM (inferPattern imports) argTypes patterns
+   let (typedPatterns, varMaps) = unzip inferred
+   let patternVars = M.unions varMaps
 
-   -- 3) withVars inferType of `expr`
-   expr' <- withVars patVars (inferType imps expr)
+   -- 3) withVars inferType of `expression`
+   typedExpression <- withVars patternVars (inferType imports expression)
 
    -- 4) compare types
-   compareTypes implLoc retType (typeOf expr')
+   compareTypes implLocation retType (typeOf typedExpression)
 
-   pure $ StmtFunc (FnImpl (FuncImpl implLoc fnIdent pats' expr'))
+   pure $ StmtFunc (FnImpl (FuncImpl implLocation functionName typedPatterns typedExpression))
 
-typeCheckStmt imps (StmtSystem (SysImpl (SystemImpl implLoc sysIdent entPats mWith body))) = do
-   (SystemSig _ sigEnts sigRet sigWith) <- fromJust <$> lookupCurrentSystem sysIdent
+typeCheckStmt imports (StmtSystem (SysImpl (SystemImpl implLocation systemName entityPatterns maybeWith body))) = do
+   (SystemSig _ signatureEntities signatureResult signatureWith) <- fromJust <$> lookupCurrentSystem systemName
    -- 0) Check expressions integer bounds
    checkIntegerBounds body
 
    -- 1) match entity patterns and queried components count
-   unless (length entPats == length sigEnts) $
-      errSem (SESystemArityMismatch implLoc sysIdent (length sigEnts) (length entPats))
+   unless (length entityPatterns == length signatureEntities) $
+      errSem (SESystemArityMismatch implLocation systemName (length signatureEntities) (length entityPatterns))
 
-   entResults <- forM (zip entPats sigEnts) $ \(EntityPattern bindings, QueriedEntity tysLoc) -> do
-      let tys = map (.node) tysLoc
-      unless (length bindings == length tys) $
-         errSem (SESystemArityMismatch implLoc sysIdent (length tys) (length bindings))
+   entityResults <- forM (zip entityPatterns signatureEntities) $ \(EntityPattern bindings, QueriedEntity locatedTypes) -> do
+      let componentTypes = map (.node) locatedTypes
+      unless (length bindings == length componentTypes) $
+         errSem (SESystemArityMismatch implLocation systemName (length componentTypes) (length bindings))
       inferred <- zipWithM
-         (\ty (EntPatBinding pat access) -> do
-            (pat', vars) <- inferPattern imps ty pat
-            pure (EntPatBinding pat' access, vars))
-         tys bindings
-      let (bindings', varMaps) = unzip inferred
-      pure (EntityPattern bindings', varMaps)
-   let entPats' = map fst entResults
-   let entVarMaps = concatMap snd entResults
+         (\componentType (EntPatBinding pattern access) -> do
+            (typedPattern, vars) <- inferPattern imports componentType pattern
+            pure (EntPatBinding typedPattern access, vars))
+         componentTypes bindings
+      let (typedBindings, varMaps) = unzip inferred
+      pure (EntityPattern typedBindings, varMaps)
+   let typedEntityPatterns = map fst entityResults
+   let entityVarMaps = concatMap snd entityResults
 
    -- 2) match `with` patterns and `with` types count
-   (mWith', withVarsList) <- case (mWith, sigWith) of
+   (typedWith, withVarsList) <- case (maybeWith, signatureWith) of
       (Nothing, _) -> pure (Nothing, [])
-      (Just ps, Just wts) -> do
-         unless (length ps == length wts) $
-            errSem (SESystemArityMismatch implLoc sysIdent (length wts) (length ps))
-         inferred <- zipWithM (inferPattern imps) (map withType wts) ps
-         let (ps', varMaps) = unzip inferred
-         pure (Just ps', varMaps)
-      (Just ps, Nothing) -> do
-         errSem (SESystemArityMismatch implLoc sysIdent 0 (length ps))
-         inferred <- mapM (inferPattern imps TyInvalid) ps
-         let (ps', varMaps) = unzip inferred
-         pure (Just ps', varMaps)
+      (Just withPatterns, Just withTypes) -> do
+         unless (length withPatterns == length withTypes) $
+            errSem (SESystemArityMismatch implLocation systemName (length withTypes) (length withPatterns))
+         inferred <- zipWithM (inferPattern imports) (map withType withTypes) withPatterns
+         let (typedWithPatterns, varMaps) = unzip inferred
+         pure (Just typedWithPatterns, varMaps)
+      (Just withPatterns, Nothing) -> do
+         errSem (SESystemArityMismatch implLocation systemName 0 (length withPatterns))
+         inferred <- mapM (inferPattern imports TyInvalid) withPatterns
+         let (typedWithPatterns, varMaps) = unzip inferred
+         pure (Just typedWithPatterns, varMaps)
 
    -- 3) withVars inferType of `body`
-   body' <- withVars (M.unions (entVarMaps ++ withVarsList)) (inferType imps body)
+   typedBody <- withVars (M.unions (entityVarMaps ++ withVarsList)) (inferType imports body)
 
    -- 4) compare types
-   compareTypes implLoc sigRet (typeOf body')
+   compareTypes implLocation signatureResult (typeOf typedBody)
 
-   pure $ StmtSystem (SysImpl (SystemImpl implLoc sysIdent entPats' mWith' body'))
+   pure $ StmtSystem (SysImpl (SystemImpl implLocation systemName typedEntityPatterns typedWith typedBody))
 
-typeCheckStmt _ (StmtFunc (FnDef def)) = pure $ StmtFunc (FnDef def)
+typeCheckStmt _ (StmtFunc (FnDef definition)) = pure $ StmtFunc (FnDef definition)
 
-typeCheckStmt _ (StmtSystem (SysDef def)) = pure $ StmtSystem (SysDef def)
+typeCheckStmt _ (StmtSystem (SysDef definition)) = pure $ StmtSystem (SysDef definition)
 
-typeCheckStmt _ (StmtTypeDef td) = pure $ StmtTypeDef td
+typeCheckStmt _ (StmtTypeDef typeDef) = pure $ StmtTypeDef typeDef
 
-typeCheckStmt _ (StmtExtern ext) = pure $ StmtExtern ext
+typeCheckStmt _ (StmtExtern extern) = pure $ StmtExtern extern

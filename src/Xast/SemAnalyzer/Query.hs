@@ -10,7 +10,7 @@ import Control.Monad.State (gets)
 import qualified Data.Set as S
 
 lookupLocal :: Ident -> SemAnalyzer (Maybe VarInfo)
-lookupLocal x = asks (M.lookup x . (.vars))
+lookupLocal ident = asks (M.lookup ident . (.vars))
 
 withVars :: M.Map Ident VarInfo -> SemAnalyzer a -> SemAnalyzer a
 withVars newVars =
@@ -18,57 +18,57 @@ withVars newVars =
 
 -- | Look up a symbol by name in a specific module's symbol table
 lookupInModule :: Module -> Ident -> SemAnalyzer (Maybe SymbolInfo)
-lookupInModule m ident = gets $ \st ->
-   M.lookup m st.modules >>= \mi -> M.lookup ident mi.symbols
+lookupInModule moduleName ident = gets $ \symTable ->
+   M.lookup moduleName symTable.modules >>= \moduleInfo -> M.lookup ident moduleInfo.symbols
 
 -- | Look up a symbol in the current module
 lookupCurrentModule :: Ident -> SemAnalyzer (Maybe SymbolInfo)
 lookupCurrentModule ident = do
-   m <- gets (.currentModule)
-   lookupInModule m ident
+   moduleName <- gets (.currentModule)
+   lookupInModule moduleName ident
 
 -- | Look up a symbol brought in by unqualified imports (ImpFull or ImpSelect)
 lookupUnqualifiedSymbol :: [Located ImportDef] -> Ident -> SemAnalyzer (Maybe SymbolInfo)
-lookupUnqualifiedSymbol imps ident = do
-   ms <- gets (.modules)
+lookupUnqualifiedSymbol imports ident = do
+   modules <- gets (.modules)
    let go [] = pure Nothing
-       go (Located _ (ImportDef m pl) : rest) =
-         case pl of
+       go (Located _ (ImportDef moduleName payload) : rest) =
+         case payload of
             ImpAlias _ -> go rest
-            ImpSelect ids ->
-               if any ((== ident) . (.node)) ids
-                  then lookupInModule m ident >>= \case
-                     Just sym -> pure (Just sym)
-                     Nothing  -> go rest
+            ImpSelect identifiers ->
+               if any ((== ident) . (.node)) identifiers
+                  then lookupInModule moduleName ident >>= \case
+                     Just symbol -> pure (Just symbol)
+                     Nothing     -> go rest
                   else go rest
             ImpFull ->
-               case M.lookup m ms of
+               case M.lookup moduleName modules of
                   Nothing -> go rest
-                  Just mi ->
-                     if S.member ident mi.exports
-                        then pure (M.lookup ident mi.symbols)
+                  Just moduleInfo ->
+                     if S.member ident moduleInfo.exports
+                        then pure (M.lookup ident moduleInfo.symbols)
                         else go rest
-   go imps
+   go imports
 
 -- | Look up a symbol via a module alias: alias.ident
 lookupQualifiedSymbol :: [Located ImportDef] -> Ident -> Ident -> SemAnalyzer (Maybe SymbolInfo)
-lookupQualifiedSymbol imps alias ident = do
-   let aliased = [ m | Located _ (ImportDef m (ImpAlias (Located _ a))) <- imps, a == alias ]
+lookupQualifiedSymbol imports alias ident = do
+   let aliased = [ moduleName | Located _ (ImportDef moduleName (ImpAlias (Located _ importAlias))) <- imports, importAlias == alias ]
    case aliased of
-      []    -> pure Nothing
-      (m:_) -> lookupInModule m ident
+      []             -> pure Nothing
+      (moduleName:_) -> lookupInModule moduleName ident
 
 -- | Normalizes a looked-up symbol into constructor shape, unwrapping the merged
 -- `SymbolTypeCtor` entry used when a type shares its name with its sole constructor.
 asConstructor :: SymbolInfo -> Maybe SymbolInfo
-asConstructor s@(SymbolCtor {}) = Just s
-asConstructor (SymbolTypeCtor loc _ cid csig) = Just (SymbolCtor loc cid csig)
+asConstructor symbol@(SymbolCtor {}) = Just symbol
+asConstructor (SymbolTypeCtor loc _ constructorId ctorSignature) = Just (SymbolCtor loc constructorId ctorSignature)
 asConstructor _ = Nothing
 
 -- | Normalizes a looked-up symbol into type shape, unwrapping `SymbolTypeCtor`.
 asType :: SymbolInfo -> Maybe SymbolInfo
-asType s@(SymbolType {}) = Just s
-asType (SymbolTypeCtor loc tySig _ _) = Just (SymbolType loc tySig)
+asType symbol@(SymbolType {}) = Just symbol
+asType (SymbolTypeCtor loc typeSignature _ _) = Just (SymbolType loc typeSignature)
 asType _ = Nothing
 
 lookupCurrentConstructor :: Ident -> SemAnalyzer (Maybe SymbolInfo)
@@ -77,34 +77,34 @@ lookupCurrentConstructor ident = do
    pure (symbol >>= asConstructor)
 
 lookupUnqualifiedConstructor :: [Located ImportDef] -> Ident -> SemAnalyzer (Maybe SymbolInfo)
-lookupUnqualifiedConstructor imps ident = do
-   symbol <- lookupUnqualifiedSymbol imps ident
+lookupUnqualifiedConstructor imports ident = do
+   symbol <- lookupUnqualifiedSymbol imports ident
    pure (symbol >>= asConstructor)
 
 lookupQualifiedConstructor :: [Located ImportDef] -> Ident -> Ident -> SemAnalyzer (Maybe SymbolInfo)
-lookupQualifiedConstructor imps alias ident = do
-   symbol <- lookupQualifiedSymbol imps alias ident
+lookupQualifiedConstructor imports alias ident = do
+   symbol <- lookupQualifiedSymbol imports alias ident
    pure (symbol >>= asConstructor)
 
 lookupCurrentConType :: Ident -> SemAnalyzer (Maybe SymbolInfo)
 lookupCurrentConType ident = do
    symbol <- lookupCurrentModule ident
    pure $ case symbol >>= asType of
-      Just s@(SymbolType _ (TypeSig ctors _ _)) | S.member ident ctors -> Just s
+      Just typeSymbol@(SymbolType _ (TypeSig ctors _ _)) | S.member ident ctors -> Just typeSymbol
       _ -> Nothing
 
 lookupUnqualifiedConType :: [Located ImportDef] -> Ident -> SemAnalyzer (Maybe SymbolInfo)
-lookupUnqualifiedConType imps ident = do
-   symbol <- lookupUnqualifiedSymbol imps ident
+lookupUnqualifiedConType imports ident = do
+   symbol <- lookupUnqualifiedSymbol imports ident
    pure $ case symbol >>= asType of
-      Just s@(SymbolType _ (TypeSig ctors _ _)) | S.member ident ctors -> Just s
+      Just typeSymbol@(SymbolType _ (TypeSig ctors _ _)) | S.member ident ctors -> Just typeSymbol
       _ -> Nothing
 
 lookupQualifiedConType :: [Located ImportDef] -> Ident -> Ident -> SemAnalyzer (Maybe SymbolInfo)
-lookupQualifiedConType imps alias ident = do
-   symbol <- lookupQualifiedSymbol imps alias ident
+lookupQualifiedConType imports alias ident = do
+   symbol <- lookupQualifiedSymbol imports alias ident
    pure $ case symbol >>= asType of
-      Just s@(SymbolType _ (TypeSig ctors _ _)) | S.member ident ctors -> Just s
+      Just typeSymbol@(SymbolType _ (TypeSig ctors _ _)) | S.member ident ctors -> Just typeSymbol
       _ -> Nothing
 
 isTypeSymbol :: SymbolInfo -> Bool
@@ -117,40 +117,40 @@ isTypeSymbol = \case
 lookupCurrentTypeName :: Ident -> SemAnalyzer (Maybe SymbolInfo)
 lookupCurrentTypeName ident = do
    symbol <- lookupCurrentModule ident
-   pure (symbol >>= \s -> if isTypeSymbol s then Just s else Nothing)
+   pure (symbol >>= \candidate -> if isTypeSymbol candidate then Just candidate else Nothing)
 
 lookupUnqualifiedTypeName :: [Located ImportDef] -> Ident -> SemAnalyzer (Maybe SymbolInfo)
-lookupUnqualifiedTypeName imps ident = do
-   symbol <- lookupUnqualifiedSymbol imps ident
-   pure (symbol >>= \s -> if isTypeSymbol s then Just s else Nothing)
+lookupUnqualifiedTypeName imports ident = do
+   symbol <- lookupUnqualifiedSymbol imports ident
+   pure (symbol >>= \candidate -> if isTypeSymbol candidate then Just candidate else Nothing)
 
 lookupCurrentFunction :: Ident -> SemAnalyzer (Maybe FuncSig)
 lookupCurrentFunction ident = do
    symbol <- lookupCurrentModule ident
    pure $ case symbol of
-      Just (SymbolFn _ _ sig)       -> Just sig
-      Just (SymbolExternFn _ _ sig) -> Just sig
-      _ -> Nothing
+      Just (SymbolFn _ _ signature)       -> Just signature
+      Just (SymbolExternFn _ _ signature) -> Just signature
+      _                                   -> Nothing
 
 lookupUnqualifiedFunction :: [Located ImportDef] -> Ident -> SemAnalyzer (Maybe FuncSig)
-lookupUnqualifiedFunction imps ident = do
-   symbol <- lookupUnqualifiedSymbol imps ident
+lookupUnqualifiedFunction imports ident = do
+   symbol <- lookupUnqualifiedSymbol imports ident
    pure $ case symbol of
-      Just (SymbolFn _ _ sig)       -> Just sig
-      Just (SymbolExternFn _ _ sig) -> Just sig
-      _ -> Nothing
+      Just (SymbolFn _ _ signature)       -> Just signature
+      Just (SymbolExternFn _ _ signature) -> Just signature
+      _                                   -> Nothing
 
 lookupQualifiedFunction :: [Located ImportDef] -> Ident -> Ident -> SemAnalyzer (Maybe FuncSig)
-lookupQualifiedFunction imps alias ident = do
-   symbol <- lookupQualifiedSymbol imps alias ident
+lookupQualifiedFunction imports alias ident = do
+   symbol <- lookupQualifiedSymbol imports alias ident
    pure $ case symbol of
-      Just (SymbolFn _ _ sig)       -> Just sig
-      Just (SymbolExternFn _ _ sig) -> Just sig
-      _ -> Nothing
+      Just (SymbolFn _ _ signature)       -> Just signature
+      Just (SymbolExternFn _ _ signature) -> Just signature
+      _                                   -> Nothing
 
 lookupCurrentSystem :: Ident -> SemAnalyzer (Maybe SystemSig)
 lookupCurrentSystem ident = do
    symbol <- lookupCurrentModule ident
    pure $ case symbol of
-      Just (SymbolSystem _ sig) -> Just sig
+      Just (SymbolSystem _ signature) -> Just signature
       _ -> Nothing

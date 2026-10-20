@@ -14,10 +14,10 @@ data AnalysisResult = AnalysisResult
    }
 
 data Env = Env
-   { vars      :: M.Map Ident VarInfo
-   , functions :: M.Map Ident FuncSig
-   , systems   :: M.Map Ident SystemSig
-   , allowedIntrinsics :: [Ident]
+   { vars      :: M.Map VarName VarInfo
+   , functions :: M.Map FunctionName FuncSig
+   , systems   :: M.Map SystemName SystemSig
+   , allowedIntrinsics :: [FunctionName]
    , currentTarget :: Target
    }
 
@@ -50,7 +50,10 @@ emptySymTable = SymTable
    , tySubst = M.empty
    }
 
-data QualifiedName = QualifiedName Module Ident
+data QualifiedName = QualifiedName
+   { moduleName :: Module
+   , name       :: Ident
+   }
    deriving (Eq, Show, Ord)
 
 data ModuleInfo = ModuleInfo
@@ -63,26 +66,49 @@ emptyModuleInfo :: ModuleInfo
 emptyModuleInfo = ModuleInfo M.empty S.empty
 
 data SymbolInfo
-   = SymbolType Location TypeSig
-   | SymbolTypeCtor Location TypeSig ConstructorId CtorSig
-   | SymbolCtor Location ConstructorId CtorSig
-   | SymbolFn Location FunctionId FuncSig
-   | SymbolSystem Location SystemSig
-   | SymbolExternFn Location ExternId FuncSig
+   = SymbolType
+      { location :: Location
+      , typeSig  :: TypeSig
+      }
+   | SymbolTypeCtor
+      { location      :: Location
+      , typeSig       :: TypeSig
+      , constructorId :: ConstructorId
+      , ctorSig       :: CtorSig
+      }
+   | SymbolCtor
+      { location      :: Location
+      , constructorId :: ConstructorId
+      , ctorSig       :: CtorSig
+      }
+   | SymbolFn
+      { location   :: Location
+      , functionId :: FunctionId
+      , funcSig    :: FuncSig
+      }
+   | SymbolSystem
+      { location :: Location
+      , sysSig   :: SystemSig
+      }
+   | SymbolExternFn
+      { location :: Location
+      , externId :: ExternId
+      , funcSig  :: FuncSig
+      }
    | SymbolExternType Location
    deriving (Eq, Show)
 
 data CtorSig = CtorSig
-   { owner        :: Ident
-   , generics     :: [Ident]
-   , fieldNames   :: Maybe [Ident] -- `Just` field names when declared as a record, `Nothing` otherwise
+   { owner        :: TypeName
+   , generics     :: [GenericName]
+   , fieldNames   :: Maybe [FieldName] -- `Just` field names when declared as a record, `Nothing` otherwise
    , fields       :: [Type]
    }
    deriving (Eq, Show)
 
 data TypeSig = TypeSig
-   { ctors         :: S.Set Ident
-   , generics      :: [Ident]
+   { ctors         :: S.Set CtorName
+   , generics      :: [GenericName]
    , nonExhaustive :: Bool
    }
    deriving (Eq, Show)
@@ -92,13 +118,13 @@ symbolLoc = \case
    SymbolType loc _         -> loc
    SymbolTypeCtor loc _ _ _ -> loc
    SymbolCtor loc _ _       -> loc
-   SymbolFn loc _ _       -> loc
-   SymbolSystem loc _     -> loc
-   SymbolExternFn loc _ _ -> loc
-   SymbolExternType loc   -> loc
+   SymbolFn loc _ _         -> loc
+   SymbolSystem loc _       -> loc
+   SymbolExternFn loc _ _   -> loc
+   SymbolExternType loc     -> loc
 
 data SystemSig = SystemSig
-   { name      :: Ident
+   { name      :: SystemName
    , entities  :: [QueriedEntity]
    , retType   :: Type
    , with      :: Maybe [WithType]
@@ -112,7 +138,7 @@ data VarInfo = VarInfo
    }
    deriving (Eq, Show)
 
-newtype VarId = VarId Int
+newtype VarId = VarId { inner :: Int }
    deriving (Eq, Show)
 
 data FuncSig = FuncSig
@@ -131,4 +157,7 @@ systemSig :: SystemDef -> SystemSig
 systemSig def =
    SystemSig def.name def.entities def.retType.node def.with
 
-data SuggestedImports = SuggestedImports Ident [Module]
+data SuggestedImports = SuggestedImports
+   { symbol     :: Ident
+   , candidates :: [Module]
+   }

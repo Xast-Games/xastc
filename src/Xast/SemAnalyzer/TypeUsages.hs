@@ -16,13 +16,13 @@ import Control.Applicative ((<|>))
 -- #### RESOLVE TYPE USAGES ####
 
 resolveTypeUsages :: Program Parsed -> SemAnalyzer ()
-resolveTypeUsages (Program (ModuleDef _ m _) imps stmts _) = do
-   modify $ \st -> st { currentModule = m }
-   forM_ stmts (resolveStmtTypeUsages imps)
+resolveTypeUsages (Program (ModuleDef _ moduleName _) imports stmts _) = do
+   modify $ \symTable -> symTable { currentModule = moduleName }
+   forM_ stmts (resolveStmtTypeUsages imports)
 
 resolveStmtTypeUsages :: [Located ImportDef] -> Stmt Parsed -> SemAnalyzer ()
-resolveStmtTypeUsages imps stmt =
-   let checkLocatedType (Located loc ty) = checkType imps loc ty
+resolveStmtTypeUsages imports stmt =
+   let checkLocatedType (Located loc typeOfNode) = checkType imports loc typeOfNode
    in case stmt of
       StmtTypeDef (TypeDef _ _ _ _ ctors) ->
          forM_ ctors $ \ctor ->
@@ -39,7 +39,7 @@ resolveStmtTypeUsages imps stmt =
       StmtExtern (ExtType _) -> pure ()
 
       StmtSystem (SysDef (SystemDef _ _ _ entities retType with)) -> do
-         forM_ entities $ \(QueriedEntity tys) -> forM_ tys checkLocatedType
+         forM_ entities $ \(QueriedEntity entityTypes) -> forM_ entityTypes checkLocatedType
          checkLocatedType retType
          forM_ (fromMaybe [] with) (checkLocatedType . withTypeLoc)
 
@@ -47,28 +47,28 @@ resolveStmtTypeUsages imps stmt =
 
 payloadTypes :: Payload -> [Located Type]
 payloadTypes = \case
-   PUnit        -> []
-   PTuple tys   -> tys
+   PUnit          -> []
+   PTuple types   -> types
    PRecord fields -> map (.ty) fields
 
 withTypeLoc :: WithType -> Located Type
-withTypeLoc (WithEvent lt) = lt
-withTypeLoc (WithRes lt)   = lt
+withTypeLoc (WithEvent locatedType) = locatedType
+withTypeLoc (WithRes locatedType)   = locatedType
 
 -- | Recursively resolves every `TyCon` occurring in a type against the
 -- current module's declarations and its unqualified imports.
 checkType :: [Located ImportDef] -> Location -> Type -> SemAnalyzer ()
-checkType imps loc = \case
+checkType imports loc = \case
    TyCon ident -> do
-      modSym <- lookupCurrentTypeName ident
-      impSym <- lookupUnqualifiedTypeName imps ident
-      case modSym <|> impSym of
+      currentModuleSymbol <- lookupCurrentTypeName ident
+      importedSymbol <- lookupUnqualifiedTypeName imports ident
+      case currentModuleSymbol <|> importedSymbol of
          Just _  -> pure ()
          Nothing -> errSem (SEUndefinedType loc ident)
-   TyApp a b     -> checkType imps loc a >> checkType imps loc b
-   TyTuple xs    -> forM_ xs (checkType imps loc)
-   TyFn args ret -> forM_ args (checkType imps loc) >> checkType imps loc ret
-   TyGnr _       -> pure ()
-   TyVar _       -> pure ()
-   TyInt _       -> pure ()
-   TyInvalid     -> pure ()
+   TyApp func arg       -> checkType imports loc func >> checkType imports loc arg
+   TyTuple elementTypes -> forM_ elementTypes (checkType imports loc)
+   TyFn args ret        -> forM_ args (checkType imports loc) >> checkType imports loc ret
+   TyGnr _              -> pure ()
+   TyVar _              -> pure ()
+   TyInt _              -> pure ()
+   TyInvalid            -> pure ()

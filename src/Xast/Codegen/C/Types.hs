@@ -82,10 +82,23 @@ data CExpr
    = CVar Text
    | CIntLit Integer
    | CFloatLit Double
-   | CInvoke CExpr [CArg]
-   | CBinary CBinOp CExpr CExpr
-   | CUnary CUnOp CExpr
-   | CAssign CExpr CExpr
+   | CInvoke
+      { callee    :: CExpr
+      , arguments :: [CArg]
+      }
+   | CBinary
+      { binaryOperator :: CBinOp
+      , left           :: CExpr
+      , right          :: CExpr
+      }
+   | CUnary
+      { unaryOperator :: CUnOp
+      , operand       :: CExpr
+      }
+   | CAssign
+      { target :: CExpr
+      , value  :: CExpr
+      }
    deriving Show
 
 data CArg
@@ -109,11 +122,26 @@ data CUnOp
 data CStmt
    = CBlock [CStmt]
    | CReturn (Maybe CExpr)
-   | CIf CExpr [CStmt] (Maybe [CStmt])
-   | CWhile CExpr CStmt
+   | CIf
+      { condition  :: CExpr
+      , thenBranch :: [CStmt]
+      , elseBranch :: Maybe [CStmt]
+      }
+   | CWhile
+      { condition :: CExpr
+      , body      :: CStmt
+      }
    | CExprStmt CExpr
-   | CDeclStmt CType Text (Maybe CExpr)
-   | CSwitch CExpr [(CExpr, [CStmt])] CDefaultBranch
+   | CDeclStmt
+      { ty          :: CType
+      , name        :: Text
+      , initializer :: Maybe CExpr
+      }
+   | CSwitch
+      { scrutinee     :: CExpr
+      , cases         :: [(CExpr, [CStmt])]
+      , defaultBranch :: CDefaultBranch
+      }
    deriving Show
 
 data CDefaultBranch

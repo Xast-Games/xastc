@@ -1,4 +1,3 @@
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
 module Xast.Lowerer.Match where
 
@@ -23,11 +22,11 @@ lowerMatchTo
    -> KirDest
    -> Match Desugared
    -> Lowerer [KirInstruct]
-lowerMatchTo env ty dest match = do
+lowerMatchTo env resultType dest match = do
    let (rootExprs, tupled) = case match.baseExpr of
-         ExpTuple _ es -> (es, True)
-         e             -> ([e], False)
-   let n = length rootExprs
+         ExpTuple _ elements -> (elements, True)
+         singleExpr          -> ([singleExpr], False)
+   let columnCount = length rootExprs
 
    lowered <- mapM (lowerExpr env) rootExprs
    let scrutInstrs = concatMap fst lowered
@@ -36,31 +35,31 @@ lowerMatchTo env ty dest match = do
    spans <- gets (.ctorSpans)
    fieldNamesOfCtor <- gets (.ctorFieldNames)
    let rows =
-         [ Row (map (toPat spans fieldNamesOfCtor) (rowPatterns tupled n pat)) [] i
-         | (i, MatchWing pat _) <- zip [0 ..] match.matches
+         [ Row (map (toPat spans fieldNamesOfCtor) (rowPatterns tupled columnCount pattern')) [] armIndex
+         | (armIndex, MatchWing pattern' _) <- zip [0 ..] match.matches
          ]
-   let occs = [Occ i [] | i <- [0 .. n - 1]]
+   let occs = [Occ column [] | column <- [0 .. columnCount - 1]]
    let tree = compilePatterns occs rows
 
-   let ctx = DTCtx
+   let context = DTCtx
          { ctxEnv    = env
-         , ctxTy     = ty
+         , ctxTy     = resultType
          , ctxBodies = [body | MatchWing _ body <- match.matches]
          }
-   let st0 = OccState
+   let initialState = OccState
          { vals   = M.fromList (zip occs rootVals)
          , fields = M.empty
          }
 
-   treeInstrs <- lowerTreeInto ctx st0 dest tree
+   treeInstrs <- lowerTreeInto context initialState dest tree
    pure (scrutInstrs ++ treeInstrs)
 
 rowPatterns :: Bool -> Int -> Pattern Desugared -> [Pattern Desugared]
-rowPatterns tupled n = \case
-   PatTuple _ ps | tupled, length ps == n -> ps
-   PatTuple _ [p] | n == 1 -> [p]
+rowPatterns tupled columnCount = \case
+   PatTuple _ subPatterns | tupled, length subPatterns == columnCount -> subPatterns
+   PatTuple _ [single] | columnCount == 1 -> [single]
    PatTuple {} -> todo__ "tuple patterns are not supported by the lowerer yet"
-   p | n == 1 -> [p]
+   other | columnCount == 1 -> [other]
    _ -> todo__ "pattern does not match the scrutinee columns"
 
 toPat
@@ -71,7 +70,7 @@ toPat
 toPat spans fieldNamesOfCtor = \case
    PatVar info ident ->
       case info.res of
-         Just (ResLocal lid) -> PVar lid
+         Just (ResLocal localId) -> PVar localId
          _ -> todo__ ("unresolved variable pattern " ++ show ident ++ " in match arm")
 
    PatWildcard _ -> PWildCard
@@ -85,11 +84,11 @@ toPat spans fieldNamesOfCtor = \case
          Just (ResConstructor cid) ->
             let span' = M.findWithDefault maxBound cid spans
                 declaredFieldNames = M.findWithDefault [] ident fieldNamesOfCtor
-                con = Con (TagCtor (mangleCtor info.ty ident)) (length args) span' (map patTy args) declaredFieldNames
-            in PCon con (map (toPat spans fieldNamesOfCtor) args)
+                constructor = Con (TagCtor (mangleCtor info.ty ident)) (length args) span' (map patTy args) declaredFieldNames
+            in PCon constructor (map (toPat spans fieldNamesOfCtor) args)
          _ -> todo__ ("unresolved constructor pattern " ++ show ident)
 
-   PatTuple _ [p] -> toPat spans fieldNamesOfCtor p
+   PatTuple _ [single] -> toPat spans fieldNamesOfCtor single
    _ -> todo__ "only literal, variable, wildcard and constructor patterns are supported in match arms yet"
 
 data DTCtx = DTCtx
@@ -111,61 +110,61 @@ data OccField = OccField
    }
 
 resolveOcc :: OccState -> Occ -> Lowerer ([KirInstruct], OccState, KirValue)
-resolveOcc st occ = case M.lookup occ st.vals of
-   Just v -> pure ([], st, v)
-   Nothing -> case (occ, M.lookup occ st.fields) of
+resolveOcc state occ = case M.lookup occ state.vals of
+   Just value -> pure ([], state, value)
+   Nothing -> case (occ, M.lookup occ state.fields) of
       (Occ root path@(_ : _), Just occField') -> do
-         (pre, st1, parentVal) <- resolveOcc st (Occ root (init path))
+         (prefix, parentState, parentVal) <- resolveOcc state (Occ root (init path))
          out <- freshKirName
-         fieldTy' <- monoType occField'.fieldType
+         monoFieldType <- monoType occField'.fieldType
          let instr = KirField
-               { ty        = fieldTy'
+               { ty        = monoFieldType
                , src       = parentVal
                , ctor      = occField'.ctor
                , fieldName = occField'.fieldName
                , out       = out
                }
-         let v = KirVar out
-         pure (pre ++ [instr], st1 { vals = M.insert occ v st1.vals }, v)
+         let fieldValue = KirVar out
+         pure (prefix ++ [instr], parentState { vals = M.insert occ fieldValue parentState.vals }, fieldValue)
       _ -> todo__ ("occurrence has no known type: " ++ show occ)
 
 lowerTreeInto :: DTCtx -> OccState -> KirDest -> DecisionTree -> Lowerer [KirInstruct]
-lowerTreeInto ctx st dest = \case
-   DTSwap _ t -> lowerTreeInto ctx st dest t
+lowerTreeInto context state dest = \case
+   DTSwap _ subTree -> lowerTreeInto context state dest subTree
 
    -- no arm can match
    DTFail -> pure []
 
    -- undoubted match
    leaf@(DTLeaf {}) -> do
-      branch <- lowerBranch ctx st leaf
+      branch <- lowerBranch context state leaf
       pure $ case branch of
-         Just b  -> b.instructs ++ [KirStore ctx.ctxTy dest b.value]
+         Just found -> found.instructs ++ [KirStore context.ctxTy dest found.value]
          Nothing -> []
 
    DTSwitch occ cases def -> do
-      (pre, st1, scrut) <- resolveOcc st occ
+      (prefix, scrutState, scrut) <- resolveOcc state occ
 
-      armBranches <- forM cases $ \(con, sub) -> do
+      armBranches <- forM cases $ \(constructor, subTree) -> do
          let childFields = M.fromList
-               [ (occField occ k, OccField { fieldType = fty, ctor = ctor, fieldName = fname })
-               | TagCtor ctor <- [con.tag]
-               , (k, fty, fname) <- zip3 [0 ..] con.fieldTys con.fieldNames
+               [ (occField occ fieldIndex, OccField { fieldType = fieldType, ctor = ctor, fieldName = fieldName })
+               | TagCtor ctor <- [constructor.tag]
+               , (fieldIndex, fieldType, fieldName) <- zip3 [0 ..] constructor.fieldTys constructor.fieldNames
                ]
-         let st2 = OccState { vals = st1.vals, fields = M.union childFields st1.fields }
-         branch <- lowerBranch ctx st2 sub
-         pure (con, branch)
+         let armState = OccState { vals = scrutState.vals, fields = M.union childFields scrutState.fields }
+         branch <- lowerBranch context armState subTree
+         pure (constructor, branch)
 
       fallback <- case def of
          Nothing -> pure Nothing
-         Just t -> lowerBranch ctx st1 t
+         Just defaultTree -> lowerBranch context scrutState defaultTree
 
       -- arms that can never succeed are dropped
-      let arms = [KirMatchArm { tag = con.tag, branch = b } | (con, Just b) <- armBranches]
+      let arms = [KirMatchArm { tag = constructor.tag, branch = armBranch } | (constructor, Just armBranch) <- armBranches]
       let exhaustive = isNothing def && all (isJust . snd) armBranches
 
-      pure (pre ++ [KirMatch
-         { ty = ctx.ctxTy
+      pure (prefix ++ [KirMatch
+         { ty = context.ctxTy
          , scrutinee = scrut
          , arms = arms
          , fallback = fallback
@@ -174,20 +173,20 @@ lowerTreeInto ctx st dest = \case
          }])
 
 lowerBranch :: DTCtx -> OccState -> DecisionTree -> Lowerer (Maybe KirBranch)
-lowerBranch ctx st = \case
-   DTSwap _ t -> lowerBranch ctx st t
+lowerBranch context state = \case
+   DTSwap _ subTree -> lowerBranch context state subTree
    DTFail -> pure Nothing
 
-   DTLeaf n binds -> do
-      (pre, _, env') <- foldM bindOcc ([], st, ctx.ctxEnv) binds
-      (instrs, val) <- lowerExpr env' (ctx.ctxBodies !! n)
-      pure (Just KirBranch { instructs = pre ++ instrs, value = val })
+   DTLeaf armIndex binds -> do
+      (prefix, _, env') <- foldM bindOcc ([], state, context.ctxEnv) binds
+      (instrs, val) <- lowerExpr env' (context.ctxBodies !! armIndex)
+      pure (Just KirBranch { instructs = prefix ++ instrs, value = val })
 
-   sw@(DTSwitch {}) -> do
+   switch@(DTSwitch {}) -> do
       result <- freshKirLocalId
-      instrs <- lowerTreeInto ctx st (DestLocal result) sw
+      instrs <- lowerTreeInto context state (DestLocal result) switch
       pure (Just KirBranch { instructs = instrs, value = KirLocalRef result })
    where
-      bindOcc (pre, st', env) (lid, occ) = do
-         (instrs, st'', v) <- resolveOcc st' occ
-         pure (pre ++ instrs, st'', M.insert lid v env)
+      bindOcc (prefix, currentState, env) (localId, occ) = do
+         (instrs, nextState, value) <- resolveOcc currentState occ
+         pure (prefix ++ instrs, nextState, M.insert localId value env)

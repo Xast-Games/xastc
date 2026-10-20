@@ -23,14 +23,14 @@ runLowerer state lowerer =
 
 freshKirName :: Lowerer KirName
 freshKirName = do
-   st <- get
-   let n = st.nameSupply
-   put st { nameSupply = n + 1 }
-   pure $ KirName (pack ("t" <> show n))
+   state <- get
+   let supply = state.nameSupply
+   put state { nameSupply = supply + 1 }
+   pure $ KirName (pack ("t" <> show supply))
 
 freshKirLocalId :: Lowerer KirLocalId
 freshKirLocalId = do
-   st <- get
-   let n = st.nameSupply
-   put st { nameSupply = n + 1 }
-   pure $ KirLocalId n
+   state <- get
+   let supply = state.nameSupply
+   put state { nameSupply = supply + 1 }
+   pure $ KirLocalId supply

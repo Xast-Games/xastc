@@ -9,11 +9,11 @@ import Xast.Utils.Generic ((|>))
 
 data LowerState = LowerState
    { nameSupply :: Int
-   , typeTmpls  :: M.Map Ident TypeDef
+   , typeTmpls  :: M.Map TypeName TypeDef
    , typeInsts  :: M.Map TypeInst KirName
    , typeQueue  :: [TypeInst]
    , ctorSpans  :: M.Map ConstructorId Int
-   , ctorFieldNames :: M.Map Ident [Ident]  -- ^ declared field names of each constructor
+   , ctorFieldNames :: M.Map CtorName [FieldName]  -- ^ declared field names of each constructor
    }
 
 data TypeInst = TypeInst
@@ -53,26 +53,26 @@ data KirTypeDef = KirTypeDef
    deriving Show
 
 data KirCtor = KirCtor 
-   { name   :: Ident
+   { name   :: CtorName
    , fields :: [KirFieldDef]
    }
    deriving Show
 
 data KirFieldDef = KirFieldDef
-   { name :: Ident   -- ^ source name for records, @_0@, @_1@... for tuple-style payloads
+   { name :: FieldName   -- ^ source name for records, @_0@, @_1@... for tuple-style payloads
    , ty   :: Type
    }
    deriving Show
 
 -- | Name given to the n-th field of a tuple-style payload.
-tupleFieldName :: Int -> Ident
+tupleFieldName :: Int -> FieldName
 tupleFieldName index = Ident (T.pack ('_' : show index))
 
 -- | Every field of a payload with its name, in declaration order.
 payloadFields :: Payload -> [(Ident, Type)]
 payloadFields = \case
-   PUnit         -> []
-   PTuple types  -> zip (map tupleFieldName [0 ..]) (map (.node) types)
+   PUnit          -> []
+   PTuple types   -> zip (map tupleFieldName [0 ..]) (map (.node) types)
    PRecord fields -> [(field.name, field.ty.node) | field <- fields]
 
 isUnitStruct :: KirTypeDef -> Bool
@@ -128,7 +128,7 @@ data KirBranch = KirBranch
 
 data KirTag
    = TagLit Literal
-   | TagCtor Ident
+   | TagCtor CtorName
    deriving (Eq, Show)
 
 data KirMatchArm = KirMatchArm
@@ -138,14 +138,26 @@ data KirMatchArm = KirMatchArm
    deriving Show
 
 data KirInstruct
-   = KirCall Type KirName [KirValue] KirName
-   | KirAssign KirBindingId KirValue
-   | KirStore Type KirDest KirValue 
+   = KirCall
+      { ty     :: Type
+      , callee :: KirName
+      , args   :: [KirValue]
+      , out    :: KirName
+      }
+   | KirAssign
+      { binding :: KirBindingId
+      , value   :: KirValue
+      }
+   | KirStore
+      { ty    :: Type
+      , dest  :: KirDest
+      , value :: KirValue
+      }
    | KirField 
       { ty     :: Type 
       , src    :: KirValue
-      , ctor   :: Ident 
-      , fieldName :: Ident 
+      , ctor   :: CtorName
+      , fieldName :: FieldName
       , out    :: KirName
       }
    | KirMatch
@@ -159,7 +171,7 @@ data KirInstruct
    deriving Show
 
 newtype KirTerm
-   = KirReturn (Maybe KirValue)
+   = KirReturn { value :: Maybe KirValue }
    deriving Show
 
 data KirValue
@@ -169,10 +181,10 @@ data KirValue
    | KirLocalRef KirLocalId
    deriving Show
 
-newtype KirLocalId = KirLocalId Int
+newtype KirLocalId = KirLocalId { inner :: Int }
    deriving Show
 
-newtype KirBindingId = KirBindingId Int
+newtype KirBindingId = KirBindingId { inner :: Int }
    deriving Show
 
 data KirDest

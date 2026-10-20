@@ -43,89 +43,89 @@ importAnalysis progs = do
    forM_ progs resolveImportDeclConflicts
 
 resolveAmbiguity :: Program Parsed -> SemAnalyzer ()
-resolveAmbiguity (Program _ imps _ _) = do
-   ms <- gets (.modules)
+resolveAmbiguity (Program _ imports _ _) = do
+   modules <- gets (.modules)
    let aliasPairs =
-         [ (a, loc)
-         | Located loc (ImportDef _ (ImpAlias (Located _ a))) <- imps
+         [ (alias, loc)
+         | Located loc (ImportDef _ (ImpAlias (Located _ alias))) <- imports
          ]
-   let aliasMap = M.fromListWith (++) [ (a, [loc]) | (a, loc) <- aliasPairs ]
+   let aliasMap = M.fromListWith (++) [ (alias, [loc]) | (alias, loc) <- aliasPairs ]
 
-   forM_ (M.toList aliasMap) $ \(a, locs) ->
+   forM_ (M.toList aliasMap) $ \(alias, locs) ->
       let sorted = sortBy sortLocByPos locs
       in case sorted of
-         _l1:_l2:_ ->
+         _firstLoc:_secondLoc:_ ->
             forM_ (pairs sorted) $
-               \(loc1, loc2) -> errSem (SEAmbiguousAlias a loc1 loc2)
+               \(loc1, loc2) -> errSem (SEAmbiguousAlias alias loc1 loc2)
          _ ->
             pure ()
 
-   let addMany m ident loc = M.insertWith S.union ident (S.singleton loc) m
+   let addMany importMap ident loc = M.insertWith S.union ident (S.singleton loc) importMap
    imported <- foldM
-      (\acc (Located loc (ImportDef m pl)) ->
-         case pl of
-            ImpAlias _ -> pure acc
-            ImpSelect ids ->
-               case M.lookup m ms of
+      (\accumulator (Located loc (ImportDef moduleName payload)) ->
+         case payload of
+            ImpAlias _ -> pure accumulator
+            ImpSelect identifiers ->
+               case M.lookup moduleName modules of
                   Just _ -> do
-                     exps <- getModuleExports m
-                     let names = [ i.node | i <- ids, i.node `S.member` exps ]
-                     pure (foldl' (\mp idn -> addMany mp idn loc) acc names)
+                     exports <- getModuleExports moduleName
+                     let names = [ identifier.node | identifier <- identifiers, identifier.node `S.member` exports ]
+                     pure (foldl' (\importMap name -> addMany importMap name loc) accumulator names)
                   Nothing ->
-                     let names = map (.node) ids
-                     in pure (foldl' (\mp idn -> addMany mp idn loc) acc names)
+                     let names = map (.node) identifiers
+                     in pure (foldl' (\importMap name -> addMany importMap name loc) accumulator names)
             ImpFull ->
-               case M.lookup m ms of
+               case M.lookup moduleName modules of
                   Just _ -> do
-                     exps <- getModuleExports m
-                     let names = S.toList exps
-                     pure (foldl' (\mp idn -> addMany mp idn loc) acc names)
-                  Nothing -> pure acc
+                     exports <- getModuleExports moduleName
+                     let names = S.toList exports
+                     pure (foldl' (\importMap name -> addMany importMap name loc) accumulator names)
+                  Nothing -> pure accumulator
       )
       M.empty
-      imps
+      imports
    forM_ (M.toList imported) $ \(ident, locs) ->
       let sorted = sortBy sortLocByPos (S.toList locs)
       in case sorted of
-         _l1:_l2:_ ->
+         _firstLoc:_secondLoc:_ ->
             forM_ (pairs sorted) $
                \(loc1, loc2) -> errSem (SEAmbiguousImport ident loc1 loc2)
          _ ->
             pure ()
 
 resolveImportDeclConflicts :: Program Parsed -> SemAnalyzer ()
-resolveImportDeclConflicts (Program (ModuleDef _ m _) imps _ _) = do
-   ms <- gets (.modules)
-   let addMany mp ident loc = M.insertWith S.union ident (S.singleton loc) mp
+resolveImportDeclConflicts (Program (ModuleDef _ currentModuleName _) imports _ _) = do
+   modules <- gets (.modules)
+   let addMany importMap ident loc = M.insertWith S.union ident (S.singleton loc) importMap
    imported <- foldM
-      (\acc (Located loc (ImportDef module_ pl)) ->
-         case pl of
-            ImpAlias _ -> pure acc
-            ImpSelect ids ->
-               case M.lookup module_ ms of
+      (\accumulator (Located loc (ImportDef importedModule payload)) ->
+         case payload of
+            ImpAlias _ -> pure accumulator
+            ImpSelect identifiers ->
+               case M.lookup importedModule modules of
                   Just _ -> do
-                     exps <- getModuleExports module_
-                     let names = [ i.node | i <- ids, i.node `S.member` exps ]
-                     pure (foldl' (\mp idn -> addMany mp idn loc) acc names)
+                     exports <- getModuleExports importedModule
+                     let names = [ identifier.node | identifier <- identifiers, identifier.node `S.member` exports ]
+                     pure (foldl' (\importMap name -> addMany importMap name loc) accumulator names)
                   Nothing ->
-                     let names = map (.node) ids
-                     in pure (foldl' (\mp idn -> addMany mp idn loc) acc names)
+                     let names = map (.node) identifiers
+                     in pure (foldl' (\importMap name -> addMany importMap name loc) accumulator names)
             ImpFull ->
-               case M.lookup module_ ms of
+               case M.lookup importedModule modules of
                   Just _ -> do
-                     exps <- getModuleExports module_
-                     let names = S.toList exps
-                     pure (foldl' (\mp idn -> addMany mp idn loc) acc names)
-                  Nothing -> pure acc
+                     exports <- getModuleExports importedModule
+                     let names = S.toList exports
+                     pure (foldl' (\importMap name -> addMany importMap name loc) accumulator names)
+                  Nothing -> pure accumulator
       )
       M.empty
-      imps
+      imports
 
-   moduleData <- getModuleSymbols m
+   moduleData <- getModuleSymbols currentModuleName
    forM_ (M.toList imported) $ \(ident, importLocs) ->
       case M.lookup ident moduleData of
-         Just sym ->
-            let declLoc = symbolLoc sym
+         Just symbol ->
+            let declLoc = symbolLoc symbol
                 sorted = sortBy sortLocByPos (S.toList importLocs)
             in case sorted of
                impLoc:_ -> errSem (SEImportDeclConflict ident impLoc declLoc)
@@ -134,89 +134,89 @@ resolveImportDeclConflicts (Program (ModuleDef _ m _) imps _ _) = do
 
 resolveMissing :: [Program Parsed] -> SemAnalyzer ()
 resolveMissing progs = do
-   ms <- gets (.modules)
-   forM_ progs $ \(Program _ imps _ _) ->
-      forM_ imps $ \(Located loc (ImportDef m pl)) ->
-         if M.member m ms then
-            case pl of
-               ImpSelect ids -> do
-                  moduleData <- getModuleSymbols m
-                  exports <- getModuleExports m
+   modules <- gets (.modules)
+   forM_ progs $ \(Program _ imports _ _) ->
+      forM_ imports $ \(Located loc (ImportDef moduleName payload)) ->
+         if M.member moduleName modules then
+            case payload of
+               ImpSelect identifiers -> do
+                  moduleData <- getModuleSymbols moduleName
+                  exports <- getModuleExports moduleName
 
-                  let nodes = map (.node) ids
+                  let nodes = map (.node) identifiers
                   let missing =
-                        [ x
-                        | x <- nodes
-                        , x `M.notMember` moduleData
+                        [ node
+                        | node <- nodes
+                        , node `M.notMember` moduleData
                         ]
                   let private =
-                        [ y
-                        | y <- nodes
-                        , y `M.member` moduleData
-                        , y `S.notMember` exports
+                        [ node
+                        | node <- nodes
+                        , node `M.member` moduleData
+                        , node `S.notMember` exports
                         ]
 
                   unless (null missing) $
-                     errSem (SEMissingImports m loc missing)
+                     errSem (SEMissingImports moduleName loc missing)
 
                   unless (null private) $
-                     errSem (SEPrivateImports m loc private)
+                     errSem (SEPrivateImports moduleName loc private)
                _ ->
                   pure ()
          else
-            errSem (SEMissingModule m loc)
+            errSem (SEMissingModule moduleName loc)
 
 
 getModuleSymbols :: Module -> SemAnalyzer (M.Map Ident SymbolInfo)
-getModuleSymbols m = gets $ \st ->
-   st
+getModuleSymbols moduleName = gets $ \symTable ->
+   symTable
       |> (.modules)
-      |> M.lookup m
+      |> M.lookup moduleName
       |> fromJust
       |> (.symbols)
 
 getModuleExports :: Module -> SemAnalyzer (S.Set Ident)
-getModuleExports m = gets $ \st ->
-   st
+getModuleExports moduleName = gets $ \symTable ->
+   symTable
       |> (.modules)
-      |> M.lookup m
+      |> M.lookup moduleName
       |> fromJust
       |> (.exports)
 
 setModuleExports :: Module -> S.Set Ident -> SemAnalyzer ()
-setModuleExports m exps =
-   modify $ \st ->
-      let mi = M.findWithDefault emptyModuleInfo m st.modules
-      in st
-         { modules = M.insert m (mi { exports = exps }) st.modules
+setModuleExports moduleName exports =
+   modify $ \symTable ->
+      let moduleInfo = M.findWithDefault emptyModuleInfo moduleName symTable.modules
+      in symTable
+         { modules = M.insert moduleName (moduleInfo { exports = exports }) symTable.modules
          }
 
 resolveInvalidExports :: Program Parsed -> SemAnalyzer ()
-resolveInvalidExports (Program (ModuleDef _ m (Located loc exps)) _ _ _) =
-   case exps of
-      ExpSelect ids -> do
-         moduleData <- getModuleSymbols m
+resolveInvalidExports (Program (ModuleDef _ moduleName (Located loc exportList)) _ _ _) =
+   case exportList of
+      ExpSelect identifiers -> do
+         moduleData <- getModuleSymbols moduleName
 
-         let invalid = filter (`M.notMember` moduleData) ids
+         let invalid = filter (`M.notMember` moduleData) identifiers
          case invalid of
-            [] -> setModuleExports m (S.fromList ids)
-            err -> errSem (SEInvalidExport m loc err)
+            [] -> setModuleExports moduleName (S.fromList identifiers)
+            invalidExports -> errSem (SEInvalidExport moduleName loc invalidExports)
 
       ExpFull -> do
-         symbols <- M.keys <$> getModuleSymbols m
-         setModuleExports m (S.fromList symbols)
+         symbols <- M.keys <$> getModuleSymbols moduleName
+         setModuleExports moduleName (S.fromList symbols)
 
 resolveRedundantImports :: Program Parsed -> SemAnalyzer ()
 resolveRedundantImports (Program _ imports _ _) =
    when (length imports >= 2) $ do
-      forM_ (pairs imports) $ \i -> case uncurry intersectImport i of
+      forM_ (pairs imports) $ \importPair -> case uncurry intersectImport importPair of
          Just redundant -> warnSem (SWRedundantImport redundant)
          Nothing        -> return ()
 
 resolveCyclicImports :: [Program Parsed] -> SemAnalyzer ()
 resolveCyclicImports progs = do
-   let moduleMap = M.fromList [(fst (getModuleName p), getImports p) | p <- progs]
-   let moduleLocations = M.fromList [getModuleName p | p <- progs]
+   let moduleMap = M.fromList [(fst (getModuleName program), getImports program) | program <- progs]
+   let moduleLocations = M.fromList [getModuleName program | program <- progs]
 
    forM_ (M.keys moduleMap) $ \moduleName ->
       forM_ (M.lookup moduleName moduleLocations)
@@ -246,19 +246,19 @@ detectCycle moduleMap moduleLocations visited path current loc
    | current `S.member` visited =
       case dropWhile (/= current) path of
          [] -> return ()
-         cyc -> unless (allEqual cyc) $
-            errSem (SECyclicImportError cyc loc)
+         cycle' -> unless (allEqual cycle') $
+            errSem (SECyclicImportError cycle' loc)
    | otherwise =
       case M.lookup current moduleMap of
          Nothing -> return ()
          Just imports ->
-            forM_ imports $ \imp ->
-               forM_ (M.lookup imp moduleLocations)
+            forM_ imports $ \importedModule ->
+               forM_ (M.lookup importedModule moduleLocations)
                   ( detectCycle
                      moduleMap
                      moduleLocations
                      (S.insert current visited)
-                     (path ++ [imp]) imp
+                     (path ++ [importedModule]) importedModule
                   )
 
 resolveSelfImport :: Program Parsed -> SemAnalyzer ()

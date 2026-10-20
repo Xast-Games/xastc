@@ -10,9 +10,9 @@ import Data.Text (Text)
 import qualified Xast.Utils.List as L
 
 debugPrograms :: [CProgram] -> String
-debugPrograms progs = intercalate "\n\n" $ L.forEach progs $ \prog ->
-   let path = show $ bold $ cyan prog.path
-       code = show $ prettyProgram prog
+debugPrograms programs = intercalate "\n\n" $ L.forEach programs $ \program ->
+   let path = show $ bold $ cyan program.path
+       code = show $ prettyProgram program
    in path ++ ":\n" ++ code
 
 header :: Doc ann
@@ -21,13 +21,13 @@ header =
    -- <> "#include <flecs.h>" <> hardline <> hardline
 
 prettyProgram :: CProgram -> Doc ann
-prettyProgram prog = 
+prettyProgram program = 
    header <>
-   foldMap prettyDecl prog.declarations
+   foldMap prettyDecl program.declarations
 
 prettyDecl :: CDecl -> Doc ann
 prettyDecl (CFunc func) = prettyFunction func <> hardline
-prettyDecl (CGlob glob) = prettyGlobal glob <> hardline
+prettyDecl (CGlob global) = prettyGlobal global <> hardline
 prettyDecl (CStructDef struct) = prettyStructDef struct <> hardline
 prettyDecl (CEnumDef enum) = prettyEnumDef enum <> hardline
 prettyDecl (CTaggedUnionDef taggedUnion) = prettyTaggedUnionDef taggedUnion <> hardline
@@ -79,8 +79,8 @@ prettyStructDef struct =
    pretty struct.name <> ";"
 
 prettyField :: (Text, CType) -> Doc ann
-prettyField (name, ty) = 
-   prettyType ty <+> pretty name <> ";"
+prettyField (name, fieldType) = 
+   prettyType fieldType <+> pretty name <> ";"
 
 prettyFunction :: CFunction -> Doc ann
 prettyFunction func = 
@@ -101,10 +101,10 @@ prettyStmt = \case
       , "}"
       ]
    CReturn Nothing -> "return;"
-   CReturn (Just e) -> "return" <+> prettyExpr e <> ";"
-   CExprStmt e -> prettyExpr e <> ";"
-   CDeclStmt ty name Nothing -> prettyType ty <+> pretty name <> ";"
-   CDeclStmt ty name (Just e) -> prettyType ty <+> pretty name <+> "=" <+> prettyExpr e <> ";"
+   CReturn (Just expr) -> "return" <+> prettyExpr expr <> ";"
+   CExprStmt expr -> prettyExpr expr <> ";"
+   CDeclStmt declType name Nothing -> prettyType declType <+> pretty name <> ";"
+   CDeclStmt declType name (Just expr) -> prettyType declType <+> pretty name <+> "=" <+> prettyExpr expr <> ";"
    CIf cond if' Nothing ->
       "if" <+> enclose "(" ")" (prettyExpr cond) <+> vsep 
          [ "{"
@@ -131,8 +131,8 @@ prettyStmt = \case
          , "}"
          ]
       where
-         prettyCase (lbl, stmts) = vsep
-            [ "case" <+> prettyExpr lbl <> ": {"
+         prettyCase (label, stmts) = vsep
+            [ "case" <+> prettyExpr label <> ": {"
             , indent 4 (vsep (map prettyStmt stmts ++ ["break;"]))
             , "}"
             ]
@@ -149,18 +149,18 @@ prettyStmt = \case
 
 prettyExpr :: CExpr -> Doc ann
 prettyExpr = \case
-   CVar name            -> pretty name
-   CIntLit int          -> pretty int
-   CFloatLit float      -> pretty float
-   CInvoke caller args  -> prettyExpr caller <> encloseSep "(" ")" ", " (map prettyCArg args)
-   CBinary op a b       -> prettyExpr a <+> prettyBinOp op <+> prettyExpr b
-   CUnary op a          -> prettyUnOp op <> prettyExpr a
-   CAssign left right   -> prettyExpr left <+> "=" <+> prettyExpr right
+   CVar name             -> pretty name
+   CIntLit int           -> pretty int
+   CFloatLit float       -> pretty float
+   CInvoke caller args   -> prettyExpr caller <> encloseSep "(" ")" ", " (map prettyCArg args)
+   CBinary op left right -> prettyExpr left <+> prettyBinOp op <+> prettyExpr right
+   CUnary op operand     -> prettyUnOp op <> prettyExpr operand
+   CAssign left right    -> prettyExpr left <+> "=" <+> prettyExpr right
 
 prettyCArg :: CArg -> Doc ann
 prettyCArg = \case
    CExprArg expr -> prettyExpr expr
-   CTypeArg ty -> prettyType ty
+   CTypeArg argType -> prettyType argType
 
 prettyBinOp :: CBinOp -> Doc ann
 prettyBinOp = \case
@@ -192,18 +192,18 @@ prettyGlobal _global = "/* globals are not implemented */"
 
 prettyType :: CType -> Doc ann
 prettyType = \case
-   CVoid    -> "void"
-   CSize    -> "ptrdiff_t"
-   CUSize   -> "size_t"
-   CLong    -> "int64_t"
-   CInt     -> "int32_t"
-   CShort   -> "int16_t"
-   CByte    -> "int8_t"
-   CULong   -> "uint64_t"
-   CUInt    -> "uint32_t"
-   CUShort  -> "uint16_t"
-   CUByte   -> "uint8_t"
-   CFloat   -> "float"
-   CDouble  -> "double"
-   CPointer ty    -> prettyType ty <> "*"
-   CStruct name   -> pretty name
+   CVoid            -> "void"
+   CSize            -> "ptrdiff_t"
+   CUSize           -> "size_t"
+   CLong            -> "int64_t"
+   CInt             -> "int32_t"
+   CShort           -> "int16_t"
+   CByte            -> "int8_t"
+   CULong           -> "uint64_t"
+   CUInt            -> "uint32_t"
+   CUShort          -> "uint16_t"
+   CUByte           -> "uint8_t"
+   CFloat           -> "float"
+   CDouble          -> "double"
+   CPointer pointee -> prettyType pointee <> "*"
+   CStruct name     -> pretty name

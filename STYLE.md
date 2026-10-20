@@ -148,3 +148,45 @@
         L.forMaybe (head container.ctors).fields $ \field ->
             fmap (, container.name) (fieldTypeName field)
     ```
+
+8. Write chains of transformations left to right with `|>` instead of nesting calls or composing with `.`:
+
+    **BAD:**
+    ```haskell
+    isEnum td = null (filter (not . null . (.fields)) td.ctors)
+    ```
+
+    **GOOD:**
+    ```haskell
+    isEnum td = td.ctors
+        |> filter (\ctor -> not $ null ctor.fields)
+        |> null
+    ```
+
+9. Give every condition or step with a meaning its own small top-level function with an intention-revealing name (and a short comment if the name does not say everything), instead of an inline lambda or a long expression:
+
+    **BAD:**
+    ```haskell
+    filter (\ty -> case ty of { TyTuple [] -> False; _ -> True }) fields
+    ```
+
+    **GOOD:**
+    ```haskell
+    notUnit :: Type -> Bool
+    notUnit (TyTuple []) = False
+    notUnit _ = True
+
+    fields |> filter notUnit
+    ```
+
+10. Import utility modules `qualified` (`import qualified Xast.Utils.List as L`), never `import Xast.Utils.List as L`: without `qualified` every name of the module is still imported unqualified and silently clashes with your own bindings (e.g. a local `pairs`):
+
+    **BAD:**
+    ```haskell
+    import Xast.Utils.List as L
+    ```
+
+    **GOOD:**
+    ```haskell
+    import qualified Xast.Utils.List as L
+    ```

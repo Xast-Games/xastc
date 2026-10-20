@@ -30,58 +30,58 @@ fullAnalysis
    -> [Program Parsed]
    -> Target
    -> ExceptT [SemError] m AnalysisResult
-fullAnalysis reportWarnings saveFile progs target = do
+fullAnalysis reportWarnings saveFile programs target = do
    let env = emptyEnv target
-       st0 = emptySymTable
+       symTable0 = emptySymTable
 
-   (_, st1, warns1) <- ExceptT $ pure $ runPhase env st0 (forM progs declareStmts)
-   lift $ reportWarnings warns1
+   (_, symTable1, warnings1) <- ExceptT $ pure $ runPhase env symTable0 (forM programs declareStmts)
+   lift $ reportWarnings warnings1
 
-   (_, st2, warns2) <- ExceptT $ pure $ runPhase env st1 (importAnalysis progs)
-   lift $ reportWarnings warns2
+   (_, symTable2, warnings2) <- ExceptT $ pure $ runPhase env symTable1 (importAnalysis programs)
+   lift $ reportWarnings warnings2
 
-   (_, st3, warns3) <- ExceptT $ pure $ runPhase env st2 (forM_ progs resolveTypeUsages)
-   lift $ reportWarnings warns3
+   (_, symTable3, warnings3) <- ExceptT $ pure $ runPhase env symTable2 (forM_ programs resolveTypeUsages)
+   lift $ reportWarnings warnings3
 
-   (progsResolved, st4, warns4) <- ExceptT $ pure $ runPhase env st3 (forM progs resolveNames)
-   lift $ reportWarnings warns4
+   (programsResolved, symTable4, warnings4) <- ExceptT $ pure $ runPhase env symTable3 (forM programs resolveNames)
+   lift $ reportWarnings warnings4
 
-   (progsTyped, st5, warns5) <- ExceptT $ pure $ runPhase env st4 (forM progsResolved typeCheck)
-   lift $ reportWarnings warns5
+   (programsTyped, symTable5, warnings5) <- ExceptT $ pure $ runPhase env symTable4 (forM programsResolved typeCheck)
+   lift $ reportWarnings warnings5
 
    -- Types stored on AST nodes may have been frozen before later unification
    -- resolved their type variables (e.g. a variable's own reference is typed
    -- before its use forces a substitution). Zonk every node against the final
    -- substitution map so the typed AST reflects fully-resolved types.
-   let progsZonked = map (zonkProgram st5.tySubst) progsTyped
+   let programsZonked = map (zonkProgram symTable5.tySubst) programsTyped
 
-   (progsDesugared, st6, warns6) <- ExceptT $ pure $ runPhase env st5 (forM progsZonked desugarProgram)
+   (programsDesugared, symTable6, warnings6) <- ExceptT $ pure $ runPhase env symTable5 (forM programsZonked desugarProgram)
 
-   let warningsCount = sum $ map length [warns1, warns2, warns3, warns4, warns5, warns6]
+   let warningsCount = sum $ map length [warnings1, warnings2, warnings3, warnings4, warnings5, warnings6]
 
    return $ AnalysisResult
       { warningsCount = warningsCount
-      , progs = progsDesugared
-      , ctorSpans = collectCtorSpans st6
+      , progs = programsDesugared
+      , ctorSpans = collectCtorSpans symTable6
       }
 
 -- | Number of constructors of the owning type for every constructor id
 -- (`maxBound` for non-exhaustive types), used by the decision tree compiler.
 collectCtorSpans :: SymTable -> M.Map ConstructorId Int
-collectCtorSpans st = M.fromList
-   [ (cid, spanOf modInfo sig.owner)
-   | modInfo <- M.elems st.modules
-   , sym <- M.elems modInfo.symbols
-   , (cid, sig) <- case sym of
-         SymbolCtor _ c s       -> [(c, s)]
-         SymbolTypeCtor _ _ c s -> [(c, s)]
-         _                      -> []
+collectCtorSpans symTable = M.fromList
+   [ (constructorId, spanOf moduleInfo signature.owner)
+   | moduleInfo <- M.elems symTable.modules
+   , symbol <- M.elems moduleInfo.symbols
+   , (constructorId, signature) <- case symbol of
+         SymbolCtor _ ctorId ctorSignature       -> [(ctorId, ctorSignature)]
+         SymbolTypeCtor _ _ ctorId ctorSignature -> [(ctorId, ctorSignature)]
+         _                                       -> []
    ]
    where
-      spanOf modInfo owner = case M.lookup owner modInfo.symbols of
-         Just (SymbolType _ ts)         -> tsSpan ts
-         Just (SymbolTypeCtor _ ts _ _) -> tsSpan ts
-         _                              -> maxBound
-      tsSpan ts
-         | ts.nonExhaustive = maxBound
-         | otherwise        = S.size ts.ctors
+      spanOf moduleInfo owner = case M.lookup owner moduleInfo.symbols of
+         Just (SymbolType _ typeSignature)         -> typeSignatureSpan typeSignature
+         Just (SymbolTypeCtor _ typeSignature _ _) -> typeSignatureSpan typeSignature
+         _                                         -> maxBound
+      typeSignatureSpan typeSignature
+         | typeSignature.nonExhaustive = maxBound
+         | otherwise                   = S.size typeSignature.ctors

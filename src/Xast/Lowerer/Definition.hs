@@ -21,23 +21,23 @@ lowerSystem module' impl = do
       todo__ "0 or 2+ entities are not supported yet"
 
    let EntityPattern rawBindings = head impl.entities
-   let mkBinding bid (EntPatBinding pat access) =
-         (bid, KirBinding
-            { bindType   = patTy pat
+   let mkBinding bindingId (EntPatBinding pattern' access) =
+         (bindingId, KirBinding
+            { bindType   = patTy pattern'
             , bindSrc    = SrcEntity
             , bindAccess = access
             })
 
-   bs <- forM (zipWith mkBinding (map KirBindingId [0..]) rawBindings) $ \(bid, b) -> do
-      ty <- monoType b.bindType
-      pure (bid, b { bindType = ty })
+   indexedBindings <- forM (zipWith mkBinding (map KirBindingId [0..]) rawBindings) $ \(bindingId, binding) -> do
+      bindingType <- monoType binding.bindType
+      pure (bindingId, binding { bindType = bindingType })
    let env = M.fromList
-         [ (lid, KirBindingRef bid)
-         | (bid, (pat, _)) <- zip (map fst bs) (map (\(EntPatBinding p a) -> (p, a)) rawBindings)
-         , Just (ResLocal lid) <- [(patAnnotation pat).res]
+         [ (localId, KirBindingRef bindingId)
+         | (bindingId, (pattern', _)) <- zip (map fst indexedBindings) (map (\(EntPatBinding entityPattern access) -> (entityPattern, access)) rawBindings)
+         , Just (ResLocal localId) <- [(patAnnotation pattern').res]
          ]
 
-   (target, targetTy) <- case [(bid, b.bindType) | (bid, b) <- bs, b.bindAccess == AccessWrite] of
+   (target, targetTy) <- case [(bindingId, binding.bindType) | (bindingId, binding) <- indexedBindings, binding.bindAccess == AccessWrite] of
       [pair] -> pure pair
       _      -> todo__ "a system must write exactly one binding for now"
 
@@ -46,7 +46,7 @@ lowerSystem module' impl = do
       _ -> todo__ "only a top-level `match` system body is supported yet"
 
    let name = KirName (namespacedName module' impl.name)
-   let bindings = map snd bs
+   let bindings = map snd indexedBindings
    let body = KirBlock { instructs = bodyInstrs, term = KirReturn Nothing }
 
    return KirSystem {..}
@@ -54,30 +54,30 @@ lowerSystem module' impl = do
 lowerFunction :: Module -> FuncImpl Desugared -> Lowerer KirFunction
 lowerFunction module' impl = do
    match <- case impl.body of
-      ExpMatch _ m -> pure m
+      ExpMatch _ matchExpr -> pure matchExpr
       _ -> todo__ "only a top-level `match` function body is supported yet"
 
    paramExprs <- case match.baseExpr of
-      ExpTuple _ es -> pure es
+      ExpTuple _ elements -> pure elements
       _ -> todo__ "function bodies must match on their argument tuple"
 
    paramInfos <- forM paramExprs $ \case
       ExpVar info _ ident ->
          case info.res of
-            Just (ResLocal l) -> pure (l, ident, info.ty)
+            Just (ResLocal localId) -> pure (localId, ident, info.ty)
             _ -> todo__ ("unresolved function parameter " ++ show ident)
       _ -> todo__ "function parameters must be plain variables"
 
-   let env = M.fromList [(lid, KirVar (KirName ident.inner)) | (lid, ident, _) <- paramInfos]
+   let env = M.fromList [(localId, KirVar (KirName ident.inner)) | (localId, ident, _) <- paramInfos]
    retTy <- monoType (exprAnnotation impl.body).ty
 
    resultId <- freshKirLocalId
    bodyInstrs <- lowerMatchTo env retTy (DestLocal resultId) match
 
    let name = KirName (namespacedName module' impl.name)
-   params <- forM paramInfos $ \(_, ident, pty) -> do
-      ty <- monoType pty
-      pure KirParam { ty = ty, name = KirName ident.inner }
+   params <- forM paramInfos $ \(_, ident, paramType) -> do
+      monoParamType <- monoType paramType
+      pure KirParam { ty = monoParamType, name = KirName ident.inner }
    let body = KirBlock { instructs = bodyInstrs, term = KirReturn (Just (KirLocalRef resultId)) }
 
    return KirFunction {..}

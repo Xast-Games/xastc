@@ -19,35 +19,35 @@ ctorType :: Location -> SymbolInfo -> SemAnalyzer Type
 ctorType _ (SymbolCtor _ _ (CtorSig ownerIdent generics _ fieldTys)) = do
    fresh <- mapM (const freshTyVar) generics
    let subst    = M.fromList (zip generics fresh)
-       fields'  = map (substGnr subst) fieldTys
-       resultTy = foldl' TyApp (TyCon ownerIdent) fresh
-   pure $ if null fields' then resultTy else TyFn fields' resultTy
-ctorType loc invalid =
-   unreachableWith $ "Invalid constructor symbol at " ++ show loc ++ ": " ++ show invalid
+       fieldTypes = map (substGnr subst) fieldTys
+       resultType = foldl' TyApp (TyCon ownerIdent) fresh
+   pure $ if null fieldTypes then resultType else TyFn fieldTypes resultType
+ctorType location invalid =
+   unreachableWith $ "Invalid constructor symbol at " ++ show location ++ ": " ++ show invalid
 
 applyTypes :: Location -> Type -> Type -> SemAnalyzer Type
-applyTypes loc applicantTy operandTy = do
+applyTypes location applicantTy operandTy = do
    applicantTy' <- resolve applicantTy
    case applicantTy' of
       TyFn (argTy:restArgs) retTy -> do
-         unify loc argTy operandTy
+         unify location argTy operandTy
          if null restArgs
             then resolve retTy
             else resolve (TyFn restArgs retTy)
 
       TyFn [] _ -> do
-         errSem (SETooManyArgs loc applicantTy')
+         errSem (SETooManyArgs location applicantTy')
          pure TyInvalid
 
-      TyVar n -> do
-         retTv <- freshTyVar
-         occ <- occursCheckType n (TyFn [operandTy] retTv)
-         if occ
-            then errSem (SEInfiniteType loc n applicantTy') >> pure TyInvalid
-            else bindVar n (TyFn [operandTy] retTv) >> pure retTv
+      TyVar varId -> do
+         returnTypeVar <- freshTyVar
+         occurs <- occursCheckType varId (TyFn [operandTy] returnTypeVar)
+         if occurs
+            then errSem (SEInfiniteType location varId applicantTy') >> pure TyInvalid
+            else bindVar varId (TyFn [operandTy] returnTypeVar) >> pure returnTypeVar
 
       _ -> do
-         errSem (SENotAFunction loc applicantTy')
+         errSem (SENotAFunction location applicantTy')
          pure TyInvalid
 
 -- | Unify `expected` with `current`, binding any unresolved type variables
@@ -55,12 +55,12 @@ applyTypes loc applicantTy operandTy = do
 -- mismatch, so its output is suppressed here in favor of a plain type-error
 -- message with a stable (expected, current) type ordering.
 compareTypes :: Location -> Type -> Type -> SemAnalyzer ()
-compareTypes loc expected current = do
-   ((), reports) <- censor (const []) $ listen (unify loc expected current)
+compareTypes location expected current = do
+   ((), reports) <- censor (const []) $ listen (unify location expected current)
    when (any isSemError reports) $ do
       expected' <- resolve expected
       current' <- resolve current
-      errSem (SETypeError loc expected' current')
+      errSem (SETypeError location expected' current')
 
 -- | Like `compareTypes`, but unifies the two branch types and reports a
 -- `then`/`else`-specific mismatch instead of a generic type error.

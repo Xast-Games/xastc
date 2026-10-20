@@ -17,44 +17,47 @@ import qualified Xast.Utils.List as L
 
 -- #### RESOLVE NAMES ####
 resolveNames :: Program Parsed -> SemAnalyzer (Program Resolved)
-resolveNames (Program md@(ModuleDef _ m _) imps stmts src) = do
+resolveNames (Program moduleDef@(ModuleDef _ moduleName _) imports stmts src) = do
    resolveDefImplMatches stmts
 
-   modify $ \st -> st { currentModule = m }
+   modify $ \symTable -> symTable { currentModule = moduleName }
    stmts' <- forM stmts $ \case
       StmtFunc (FnImpl (FuncImpl implLoc fnIdent args body)) -> do
-         scope <- freshCheckedScope M.empty imps (concatMap patternVarLocs args)
-         body' <- resolveExprAt scope imps body
+         scope <- freshCheckedScope M.empty imports (concatMap patternVarLocs args)
+         body' <- resolveExprAt scope imports body
          let args' = map (resolvePattern scope) args
          pure $ StmtFunc (FnImpl (FuncImpl implLoc fnIdent args' body'))
 
-      StmtSystem (SysImpl (SystemImpl implLoc sysIdent entPats mWith body)) -> do
-         entScope  <- freshCheckedScope M.empty imps (concatMap (\(EntityPattern bs) -> concatMap (patternVarLocs . (.pat)) bs) entPats)
-         withScope <- freshCheckedScope entScope imps (maybe [] (concatMap patternVarLocs) mWith)
-         body' <- resolveExprAt (M.union entScope withScope) imps body
+      StmtSystem (SysImpl (SystemImpl implLoc sysIdent entityPatterns maybeWith body)) -> do
+         let entityPatternVars =
+               L.forFlat entityPatterns $ \(EntityPattern bindings) ->
+                  L.forFlat bindings $ \binding -> patternVarLocs binding.pat
+         entScope  <- freshCheckedScope M.empty imports entityPatternVars
+         withScope <- freshCheckedScope entScope imports (maybe [] (concatMap patternVarLocs) maybeWith)
+         body' <- resolveExprAt (M.union entScope withScope) imports body
 
-         sig <- lookupCurrentSystem sysIdent
-         let sigEnts = maybe [] (.entities) sig
-             sigRet  = maybe TyInvalid (.retType) sig
-             sigEnts' = map Just sigEnts ++ repeat Nothing
-         let entPats' = zipWith (resolveEntityPattern entScope sigRet) sigEnts' entPats
-         let mWith' = fmap (map (resolvePattern withScope)) mWith
-         pure $ StmtSystem (SysImpl (SystemImpl implLoc sysIdent entPats' mWith' body'))
+         signature <- lookupCurrentSystem sysIdent
+         let signatureEntities = maybe [] (.entities) signature
+             signatureRetType   = maybe TyInvalid (.retType) signature
+             signatureEntities' = map Just signatureEntities ++ repeat Nothing
+         let entityPatterns' = zipWith (resolveEntityPattern entScope signatureRetType) signatureEntities' entityPatterns
+         let maybeWith' = fmap (map (resolvePattern withScope)) maybeWith
+         pure $ StmtSystem (SysImpl (SystemImpl implLoc sysIdent entityPatterns' maybeWith' body'))
 
-      StmtSystem (SysDef def) -> pure $ StmtSystem (SysDef def)
+      StmtSystem (SysDef systemDef) -> pure $ StmtSystem (SysDef systemDef)
 
-      StmtFunc (FnDef def) -> pure $ StmtFunc (FnDef def)
+      StmtFunc (FnDef funcDef) -> pure $ StmtFunc (FnDef funcDef)
 
-      StmtTypeDef td -> pure $ StmtTypeDef td
+      StmtTypeDef typeDef -> pure $ StmtTypeDef typeDef
 
-      StmtExtern ext -> pure $ StmtExtern ext
+      StmtExtern externDef -> pure $ StmtExtern externDef
 
-   pure $ Program md imps stmts' src
+   pure $ Program moduleDef imports stmts' src
 
 resolveDefImplMatches :: [Stmt Parsed] -> SemAnalyzer ()
 resolveDefImplMatches stmts = go stmts stmts
    where
-      go (x:xs) allStmts = case x of
+      go (stmt:rest) allStmts = case stmt of
          StmtFunc (FnImpl (FuncImpl impLoc impIdent _ _)) ->
             let matching = L.forMaybe allStmts $ \case
                   StmtFunc (FnDef (FuncDef defLoc _ defIdent _ _)) ->
@@ -66,12 +69,12 @@ resolveDefImplMatches stmts = go stmts stmts
                 defCount = length matching
             in if defCount == 0 then do
                errSem (SEMissingFnDef impLoc impIdent)
-               go xs allStmts
+               go rest allStmts
             else if defCount > 1 then do
                errSem (SEExtraFnDef impLoc impIdent matching)
-               go xs allStmts
+               go rest allStmts
             else
-               go xs allStmts
+               go rest allStmts
 
          StmtFunc (FnDef (FuncDef defLoc _ defIdent _ _)) ->
             let matching = flip filter allStmts $ \case
@@ -80,9 +83,9 @@ resolveDefImplMatches stmts = go stmts stmts
                 count = length matching
             in if count == 0 then do
                errSem (SEMissingFnImpls defLoc defIdent)
-               go xs allStmts
+               go rest allStmts
             else
-               go xs allStmts
+               go rest allStmts
 
          StmtSystem (SysImpl (SystemImpl impLoc impIdent _ _ _)) ->
             let matching = L.forMaybe allStmts $ \case
@@ -95,12 +98,12 @@ resolveDefImplMatches stmts = go stmts stmts
                 defCount = length matching
             in if defCount == 0 then do
                errSem (SEMissingSystemDef impLoc impIdent)
-               go xs allStmts
+               go rest allStmts
             else if defCount > 1 then do
                errSem (SEExtraSystemDef impLoc impIdent matching)
-               go xs allStmts
+               go rest allStmts
             else
-               go xs allStmts
+               go rest allStmts
 
          StmtSystem (SysDef (SystemDef defLoc _ defIdent _ _ _)) ->
             let matching = flip filter allStmts $ \case
@@ -109,39 +112,39 @@ resolveDefImplMatches stmts = go stmts stmts
                 count = length matching
             in if count == 0 then do
                errSem (SEMissingSystemImpls defLoc defIdent)
-               go xs allStmts
+               go rest allStmts
             else
-               go xs allStmts
+               go rest allStmts
 
-         _ -> go xs allStmts
+         _ -> go rest allStmts
 
       go [] _ = pure ()
 
 patternVarLocs :: Pattern Parsed -> [(Ident, Location)]
 patternVarLocs = \case
-   PatVar (ParsedInfo loc) x -> [(x, loc)]
-   PatWildcard _ -> []
-   PatLit _ _    -> []
-   PatList _ ps  -> concatMap patternVarLocs ps
-   PatTuple _ ps -> concatMap patternVarLocs ps
-   PatCon _ _ ps -> concatMap patternVarLocs ps
+   PatVar (ParsedInfo loc) name -> [(name, loc)]
+   PatWildcard _                -> []
+   PatLit _ _                   -> []
+   PatList _ patterns           -> concatMap patternVarLocs patterns
+   PatTuple _ patterns          -> concatMap patternVarLocs patterns
+   PatCon _ _ patterns          -> concatMap patternVarLocs patterns
 
 freshCheckedScope
    :: M.Map Ident (LocalId, Location)
    -> [Located ImportDef]
    -> [(Ident, Location)]
    -> SemAnalyzer (M.Map Ident (LocalId, Location))
-freshCheckedScope outerScope imps newVars = do
+freshCheckedScope outerScope imports newVars = do
    checkNoDuplicates M.empty newVars
    forM_ newVars $ \(ident, loc) ->
       case M.lookup ident outerScope of
          Just (_, outerLoc) -> errSem (SEShadowedBinding ident outerLoc loc)
          Nothing -> do
-            modSym <- lookupCurrentModule ident
-            impSym <- lookupUnqualifiedSymbol imps ident
-            case modSym <|> impSym of
-               Just sym -> errSem (SEShadowedBinding ident (symbolLoc sym) loc)
-               Nothing  -> pure ()
+            currentModuleSymbol <- lookupCurrentModule ident
+            importedSymbol <- lookupUnqualifiedSymbol imports ident
+            case currentModuleSymbol <|> importedSymbol of
+               Just symbol -> errSem (SEShadowedBinding ident (symbolLoc symbol) loc)
+               Nothing     -> pure ()
    freshLocalScope newVars
    where
       checkNoDuplicates _ [] = pure ()
@@ -155,43 +158,43 @@ freshCheckedScope outerScope imps newVars = do
 
 resolvePattern :: M.Map Ident (LocalId, Location) -> Pattern Parsed -> Pattern Resolved
 resolvePattern scope = \case
-   PatVar (ParsedInfo loc) x ->
-      PatVar (ResolvedInfo loc (ResLocal . fst <$> M.lookup x scope)) x
+   PatVar (ParsedInfo loc) name ->
+      PatVar (ResolvedInfo loc (ResLocal . fst <$> M.lookup name scope)) name
    PatWildcard (ParsedInfo loc) ->
       PatWildcard (ResolvedInfo loc Nothing)
    PatLit (ParsedInfo loc) lit ->
       PatLit (ResolvedInfo loc Nothing) lit
-   PatList (ParsedInfo loc) ps ->
-      PatList (ResolvedInfo loc Nothing) (map (resolvePattern scope) ps)
-   PatTuple (ParsedInfo loc) ps ->
-      PatTuple (ResolvedInfo loc Nothing) (map (resolvePattern scope) ps)
-   PatCon (ParsedInfo loc) ident ps ->
-      PatCon (ResolvedInfo loc Nothing) ident (map (resolvePattern scope) ps)
+   PatList (ParsedInfo loc) patterns ->
+      PatList (ResolvedInfo loc Nothing) (map (resolvePattern scope) patterns)
+   PatTuple (ParsedInfo loc) patterns ->
+      PatTuple (ResolvedInfo loc Nothing) (map (resolvePattern scope) patterns)
+   PatCon (ParsedInfo loc) ident patterns ->
+      PatCon (ResolvedInfo loc Nothing) ident (map (resolvePattern scope) patterns)
 
 componentAccess :: Type -> Type -> BindingAccess
-componentAccess sysRet ty
-   | typeContains ty sysRet = AccessWrite
-   | otherwise              = AccessRead
+componentAccess systemRetType componentType
+   | typeContains componentType systemRetType = AccessWrite
+   | otherwise                                = AccessRead
 
 typeContains :: Type -> Type -> Bool
 typeContains needle haystack
    | needle == haystack = True
    | otherwise = case haystack of
-      TyApp a b   -> typeContains needle a || typeContains needle b
-      TyTuple xs  -> any (typeContains needle) xs
-      TyFn args r -> any (typeContains needle) args || typeContains needle r
-      _           -> False
+      TyApp func arg      -> typeContains needle func || typeContains needle arg
+      TyTuple memberTypes -> any (typeContains needle) memberTypes
+      TyFn args retType   -> any (typeContains needle) args || typeContains needle retType
+      _                   -> False
 
 resolveEntityPattern :: M.Map Ident (LocalId, Location) -> Type -> Maybe QueriedEntity -> EntityPattern Parsed -> EntityPattern Resolved
-resolveEntityPattern scope sysRet mEnt (EntityPattern bindings) =
-   EntityPattern (zipWith bindOne tys bindings)
+resolveEntityPattern scope systemRetType maybeEntity (EntityPattern bindings) =
+   EntityPattern (zipWith bindOne componentTypes bindings)
    where
-      tys = case mEnt of
-         Just (QueriedEntity ts) -> map (Just . (.node)) ts ++ repeat Nothing
-         Nothing                 -> repeat Nothing
+      componentTypes = case maybeEntity of
+         Just (QueriedEntity entityTypes) -> map (Just . (.node)) entityTypes ++ repeat Nothing
+         Nothing                          -> repeat Nothing
 
-      bindOne mTy (EntPatBinding pat _) =
-         EntPatBinding (resolvePattern scope pat) (maybe AccessRead (componentAccess sysRet) mTy)
+      bindOne maybeType (EntPatBinding pat _) =
+         EntPatBinding (resolvePattern scope pat) (maybe AccessRead (componentAccess systemRetType) maybeType)
 
 resolveExprAt
    :: M.Map Ident (LocalId, Location)
@@ -205,112 +208,112 @@ resolveExpr
    -> [Located ImportDef]
    -> Expr Parsed
    -> SemAnalyzer (Expr Resolved)
-resolveExpr scope imps expr = case expr of
-   ExpVar (ParsedInfo loc) Nothing x -> case M.lookup x scope of
-      Just (lid, _) -> pure $ ExpVar (ResolvedInfo loc (Just (ResLocal lid))) Nothing x
+resolveExpr scope imports expr = case expr of
+   ExpVar (ParsedInfo loc) Nothing name -> case M.lookup name scope of
+      Just (localId, _) -> pure $ ExpVar (ResolvedInfo loc (Just (ResLocal localId))) Nothing name
       Nothing -> do
-         modSym <- lookupCurrentModule x
-         impSym <- lookupUnqualifiedSymbol imps x
-         case modSym <|> impSym of
-            Just (SymbolFn _ fid _)       -> pure $ ExpVar (ResolvedInfo loc (Just (ResFunction fid))) Nothing x
-            Just (SymbolExternFn _ eid _) -> pure $ ExpVar (ResolvedInfo loc (Just (ResExternFunction eid))) Nothing x
-            _ -> do
-               errSem (SEUndefinedVar loc x)
-               pure $ ExpVar (ResolvedInfo loc Nothing) Nothing x
+         currentModuleSymbol <- lookupCurrentModule name
+         importedSymbol <- lookupUnqualifiedSymbol imports name
+         case currentModuleSymbol <|> importedSymbol of
+            Just (SymbolFn _ functionId _)     -> pure $ ExpVar (ResolvedInfo loc (Just (ResFunction functionId))) Nothing name
+            Just (SymbolExternFn _ externId _) -> pure $ ExpVar (ResolvedInfo loc (Just (ResExternFunction externId))) Nothing name
+            _                                  -> do
+               errSem (SEUndefinedVar loc name)
+               pure $ ExpVar (ResolvedInfo loc Nothing) Nothing name
 
-   ExpVar (ParsedInfo loc) (Just alias) x ->
+   ExpVar (ParsedInfo loc) (Just alias) name ->
       let hasAlias = \case
-            Located _ (ImportDef _ (ImpAlias (Located _ a))) -> a == alias
+            Located _ (ImportDef _ (ImpAlias (Located _ importAlias))) -> importAlias == alias
             _ -> False
-      in if not $ any hasAlias imps then do
+      in if not $ any hasAlias imports then do
          errSem (SEUndefinedAlias (sourceName loc.pos) alias)
-         pure $ ExpVar (ResolvedInfo loc Nothing) (Just alias) x
+         pure $ ExpVar (ResolvedInfo loc Nothing) (Just alias) name
       else do
-         sym <- lookupQualifiedSymbol imps alias x
-         case sym of
-            Just (SymbolFn _ fid _)       -> pure $ ExpVar (ResolvedInfo loc (Just (ResFunction fid))) (Just alias) x
-            Just (SymbolExternFn _ eid _) -> pure $ ExpVar (ResolvedInfo loc (Just (ResExternFunction eid))) (Just alias) x
-            _ -> do
-               errSem (SEUndefinedVar loc x)
-               pure $ ExpVar (ResolvedInfo loc Nothing) (Just alias) x
+         qualifiedSymbol <- lookupQualifiedSymbol imports alias name
+         case qualifiedSymbol of
+            Just (SymbolFn _ functionId _)     -> pure $ ExpVar (ResolvedInfo loc (Just (ResFunction functionId))) (Just alias) name
+            Just (SymbolExternFn _ externId _) -> pure $ ExpVar (ResolvedInfo loc (Just (ResExternFunction externId))) (Just alias) name
+            _                                  -> do
+               errSem (SEUndefinedVar loc name)
+               pure $ ExpVar (ResolvedInfo loc Nothing) (Just alias) name
 
-   ExpCon (ParsedInfo loc) Nothing x -> do
-      modCon <- lookupCurrentConstructor x
-      impCon <- lookupUnqualifiedConstructor imps x
-      case modCon <|> impCon of
-         Just (SymbolCtor _ cid _) -> pure $ ExpCon (ResolvedInfo loc (Just (ResConstructor cid))) Nothing x
+   ExpCon (ParsedInfo loc) Nothing name -> do
+      currentModuleConstructor <- lookupCurrentConstructor name
+      importedConstructor <- lookupUnqualifiedConstructor imports name
+      case currentModuleConstructor <|> importedConstructor of
+         Just (SymbolCtor _ constructorId _) -> pure $ ExpCon (ResolvedInfo loc (Just (ResConstructor constructorId))) Nothing name
          _ -> do
-            errSem (SEUndefinedCon loc x)
-            pure $ ExpCon (ResolvedInfo loc Nothing) Nothing x
+            errSem (SEUndefinedCon loc name)
+            pure $ ExpCon (ResolvedInfo loc Nothing) Nothing name
 
-   ExpCon (ParsedInfo loc) (Just alias) x ->
+   ExpCon (ParsedInfo loc) (Just alias) name ->
       let hasAlias = \case
-            Located _ (ImportDef _ (ImpAlias (Located _ a))) -> a == alias
+            Located _ (ImportDef _ (ImpAlias (Located _ importAlias))) -> importAlias == alias
             _ -> False
-      in if not $ any hasAlias imps then do
+      in if not $ any hasAlias imports then do
          errSem (SEUndefinedAlias (sourceName loc.pos) alias)
-         pure $ ExpCon (ResolvedInfo loc Nothing) (Just alias) x
+         pure $ ExpCon (ResolvedInfo loc Nothing) (Just alias) name
       else do
-         con <- lookupQualifiedConstructor imps alias x
-         case con of
-            Just (SymbolCtor _ cid _) -> pure $ ExpCon (ResolvedInfo loc (Just (ResConstructor cid))) (Just alias) x
+         qualifiedConstructor <- lookupQualifiedConstructor imports alias name
+         case qualifiedConstructor of
+            Just (SymbolCtor _ constructorId _) -> pure $ ExpCon (ResolvedInfo loc (Just (ResConstructor constructorId))) (Just alias) name
             _ -> do
-               errSem (SEUndefinedCon loc x)
-               pure $ ExpCon (ResolvedInfo loc Nothing) (Just alias) x
+               errSem (SEUndefinedCon loc name)
+               pure $ ExpCon (ResolvedInfo loc Nothing) (Just alias) name
 
-   ExpTuple (ParsedInfo loc) xs -> ExpTuple (ResolvedInfo loc Nothing) <$> mapM (resolveExprAt scope imps) xs
+   ExpTuple (ParsedInfo loc) expressions -> ExpTuple (ResolvedInfo loc Nothing) <$> mapM (resolveExprAt scope imports) expressions
 
-   ExpList (ParsedInfo loc) xs -> ExpList (ResolvedInfo loc Nothing) <$> mapM (resolveExprAt scope imps) xs
+   ExpList (ParsedInfo loc) expressions -> ExpList (ResolvedInfo loc Nothing) <$> mapM (resolveExprAt scope imports) expressions
 
    ExpLit (ParsedInfo loc) lit -> pure $ ExpLit (ResolvedInfo loc Nothing) lit
 
    ExpLambda (ParsedInfo loc) (Lambda args body) -> do
-      argScope <- freshCheckedScope scope imps (concatMap patternVarLocs args)
-      body' <- resolveExprAt (M.union argScope scope) imps body
+      argScope <- freshCheckedScope scope imports (concatMap patternVarLocs args)
+      body' <- resolveExprAt (M.union argScope scope) imports body
       let args' = map (resolvePattern argScope) args
       pure $ ExpLambda (ResolvedInfo loc Nothing) (Lambda args' body')
 
    ExpApp (ParsedInfo loc) lhs rhs -> do
-      lhs' <- resolveExprAt scope imps lhs
-      rhs' <- resolveExprAt scope imps rhs
+      lhs' <- resolveExprAt scope imports lhs
+      rhs' <- resolveExprAt scope imports rhs
       pure $ ExpApp (ResolvedInfo loc Nothing) lhs' rhs'
 
-   ExpLetIn (ParsedInfo loc) (LetIn binds body) -> do
-      bindScope <- freshCheckedScope scope imps (concatMap (patternVarLocs . (.pat)) binds)
+   ExpLetIn (ParsedInfo loc) (LetIn bindings body) -> do
+      bindScope <- freshCheckedScope scope imports (concatMap (patternVarLocs . (.pat)) bindings)
       let scope' = M.union bindScope scope
-      binds' <- forM binds $ \(Let pat value) -> do
-         value' <- resolveExprAt scope' imps value
+      bindings' <- forM bindings $ \(Let pat value) -> do
+         value' <- resolveExprAt scope' imports value
          pure $ Let (resolvePattern bindScope pat) value'
-      body' <- resolveExprAt scope' imps body
-      pure $ ExpLetIn (ResolvedInfo loc Nothing) (LetIn binds' body')
+      body' <- resolveExprAt scope' imports body
+      pure $ ExpLetIn (ResolvedInfo loc Nothing) (LetIn bindings' body')
 
-   ExpIfThen (ParsedInfo loc) (IfThenElse cond tr fl) -> do
-      cond' <- resolveExprAt scope imps cond
-      tr' <- resolveExprAt scope imps tr
-      fl' <- resolveExprAt scope imps fl
-      pure $ ExpIfThen (ResolvedInfo loc Nothing) (IfThenElse cond' tr' fl')
+   ExpIfThen (ParsedInfo loc) (IfThenElse condition thenBranch elseBranch) -> do
+      condition' <- resolveExprAt scope imports condition
+      thenBranch' <- resolveExprAt scope imports thenBranch
+      elseBranch' <- resolveExprAt scope imports elseBranch
+      pure $ ExpIfThen (ResolvedInfo loc Nothing) (IfThenElse condition' thenBranch' elseBranch')
 
-   ExpMatch (ParsedInfo loc) (Match mtExp mtMatches exhaustive) -> do
-      mtExp' <- resolveExprAt scope imps mtExp
-      mtMatches' <- forM mtMatches $ \(MatchWing pat branch) -> do
-         patScope <- freshCheckedScope scope imps (patternVarLocs pat)
-         branch' <- resolveExprAt (M.union patScope scope) imps branch
+   ExpMatch (ParsedInfo loc) (Match matchedExpr matchWings exhaustive) -> do
+      matchedExpr' <- resolveExprAt scope imports matchedExpr
+      matchWings' <- forM matchWings $ \(MatchWing pat branch) -> do
+         patScope <- freshCheckedScope scope imports (patternVarLocs pat)
+         branch' <- resolveExprAt (M.union patScope scope) imports branch
          pure $ MatchWing (resolvePattern patScope pat) branch'
-      pure $ ExpMatch (ResolvedInfo loc Nothing) (Match mtExp' mtMatches' exhaustive)
+      pure $ ExpMatch (ResolvedInfo loc Nothing) (Match matchedExpr' matchWings' exhaustive)
 
-   ExpRecConstruct (ParsedInfo loc) (RecConstruct rcBind rcCon rcAssigns) -> do
-      rcAssigns' <- forM rcAssigns $ \(RecAssign fld value) -> do
-         value' <- resolveExprAt scope imps value
-         pure $ RecAssign fld value'
-      pure $ ExpRecConstruct (ResolvedInfo loc Nothing) (RecConstruct rcBind rcCon rcAssigns')
+   ExpRecConstruct (ParsedInfo loc) (RecConstruct recordBinding recordCtor assigns) -> do
+      assigns' <- forM assigns $ \(RecAssign field value) -> do
+         value' <- resolveExprAt scope imports value
+         pure $ RecAssign field value'
+      pure $ ExpRecConstruct (ResolvedInfo loc Nothing) (RecConstruct recordBinding recordCtor assigns')
 
-   ExpRecUpdate (ParsedInfo loc) (RecUpdate ruBase ruAssigns) -> do
-      ruBase' <- resolveExprAt scope imps ruBase
-      ruAssigns' <- forM ruAssigns $ \(RecAssign fld value) -> do
-         value' <- resolveExprAt scope imps value
-         pure $ RecAssign fld value'
-      pure $ ExpRecUpdate (ResolvedInfo loc Nothing) (RecUpdate ruBase' ruAssigns')
+   ExpRecUpdate (ParsedInfo loc) (RecUpdate baseRecord assigns) -> do
+      baseRecord' <- resolveExprAt scope imports baseRecord
+      assigns' <- forM assigns $ \(RecAssign field value) -> do
+         value' <- resolveExprAt scope imports value
+         pure $ RecAssign field value'
+      pure $ ExpRecUpdate (ResolvedInfo loc Nothing) (RecUpdate baseRecord' assigns')
 
    ExpVarGetter (ParsedInfo loc) baseExpr getter -> do
-      baseExpr' <- resolveExprAt scope imps baseExpr
+      baseExpr' <- resolveExprAt scope imports baseExpr
       pure $ ExpVarGetter (ResolvedInfo loc Nothing) baseExpr' getter

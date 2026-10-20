@@ -20,61 +20,61 @@ inferPattern
    -> Type
    -> Pattern Resolved
    -> SemAnalyzer (Pattern Typed, M.Map Ident VarInfo)
-inferPattern imps ty p = case p of
-   PatVar (ResolvedInfo loc mRes) x -> do
-      vid <- freshVarId
-      pure (PatVar (TypedInfo loc ty mRes) x, M.singleton x (VarInfo ty vid []))
+inferPattern imports ty pattern = case pattern of
+   PatVar (ResolvedInfo location maybeResolution) name -> do
+      varId <- freshVarId
+      pure (PatVar (TypedInfo location ty maybeResolution) name, M.singleton name (VarInfo ty varId []))
 
-   PatWildcard (ResolvedInfo loc mRes) ->
-      pure (PatWildcard (TypedInfo loc ty mRes), M.empty)
+   PatWildcard (ResolvedInfo location maybeResolution) ->
+      pure (PatWildcard (TypedInfo location ty maybeResolution), M.empty)
 
-   PatLit (ResolvedInfo loc mRes) lit -> do
-      litTy <- literalType lit
-      unify loc ty litTy
-      pure (PatLit (TypedInfo loc ty mRes) lit, M.empty)
+   PatLit (ResolvedInfo location maybeResolution) literal -> do
+      literalTy <- literalType literal
+      unify location ty literalTy
+      pure (PatLit (TypedInfo location ty maybeResolution) literal, M.empty)
 
-   PatList (ResolvedInfo loc mRes) ps -> do
-      elemTv <- freshTyVar
-      unify loc ty (TyApp (TyCon (Ident "List")) elemTv)
-      inferred <- mapM (inferPattern imps elemTv) ps
-      let (ps', varMaps) = unzip inferred
-      pure (PatList (TypedInfo loc ty mRes) ps', M.unions varMaps)
+   PatList (ResolvedInfo location maybeResolution) patterns -> do
+      elementTypeVar <- freshTyVar
+      unify location ty (TyApp (TyCon (Ident "List")) elementTypeVar)
+      inferred <- mapM (inferPattern imports elementTypeVar) patterns
+      let (typedPatterns, varMaps) = unzip inferred
+      pure (PatList (TypedInfo location ty maybeResolution) typedPatterns, M.unions varMaps)
 
-   PatTuple (ResolvedInfo loc mRes) ps -> do
-      elemTvs <- mapM (const freshTyVar) ps
-      unify loc ty (TyTuple elemTvs)
-      inferred <- zipWithM (inferPattern imps) elemTvs ps
-      let (ps', varMaps) = unzip inferred
-      pure (PatTuple (TypedInfo loc ty mRes) ps', M.unions varMaps)
+   PatTuple (ResolvedInfo location maybeResolution) patterns -> do
+      elementTypeVars <- mapM (const freshTyVar) patterns
+      unify location ty (TyTuple elementTypeVars)
+      inferred <- zipWithM (inferPattern imports) elementTypeVars patterns
+      let (typedPatterns, varMaps) = unzip inferred
+      pure (PatTuple (TypedInfo location ty maybeResolution) typedPatterns, M.unions varMaps)
 
-   PatCon (ResolvedInfo loc mRes) ctorIdent ps -> do
-      modCtor <- lookupCurrentConstructor ctorIdent
-      impCtor <- lookupUnqualifiedConstructor imps ctorIdent
-      case modCtor <|> impCtor of
+   PatCon (ResolvedInfo location maybeResolution) ctorIdent patterns -> do
+      moduleCtor <- lookupCurrentConstructor ctorIdent
+      importedCtor <- lookupUnqualifiedConstructor imports ctorIdent
+      case moduleCtor <|> importedCtor of
          Nothing -> do
-            inferred <- mapM (inferPattern imps TyInvalid) ps
-            let ps' = map fst inferred
-            pure (PatCon (TypedInfo loc TyInvalid mRes) ctorIdent ps', M.empty)
+            inferred <- mapM (inferPattern imports TyInvalid) patterns
+            let typedPatterns = map fst inferred
+            pure (PatCon (TypedInfo location TyInvalid maybeResolution) ctorIdent typedPatterns, M.empty)
 
-         Just sym@(SymbolCtor _ cid _) -> do
-            let mRes' = Just (ResConstructor cid)
-            resultTy <- ctorType loc sym
+         Just symbol@(SymbolCtor _ ctorId _) -> do
+            let maybeResolution' = Just (ResConstructor ctorId)
+            resultTy <- ctorType location symbol
             let (expectedFieldTys, ctorResultTy) = case resultTy of
-                  TyFn args r -> (args, r)
-                  r           -> ([], r)
+                  TyFn args result -> (args, result)
+                  result           -> ([], result)
 
-            unify loc ty ctorResultTy
+            unify location ty ctorResultTy
 
-            if length ps /= length expectedFieldTys
+            if length patterns /= length expectedFieldTys
                then do
-                  errSem (SECtorArityMismatch loc ctorIdent (length expectedFieldTys) (length ps))
-                  inferred <- mapM (inferPattern imps TyInvalid) ps
-                  let ps' = map fst inferred
-                  pure (PatCon (TypedInfo loc ctorResultTy mRes') ctorIdent ps', M.empty)
+                  errSem (SECtorArityMismatch location ctorIdent (length expectedFieldTys) (length patterns))
+                  inferred <- mapM (inferPattern imports TyInvalid) patterns
+                  let typedPatterns = map fst inferred
+                  pure (PatCon (TypedInfo location ctorResultTy maybeResolution') ctorIdent typedPatterns, M.empty)
                else do
-                  inferred <- zipWithM (inferPattern imps) expectedFieldTys ps
-                  let (ps', varMaps) = unzip inferred
-                  pure (PatCon (TypedInfo loc ctorResultTy mRes') ctorIdent ps', M.unions varMaps)
+                  inferred <- zipWithM (inferPattern imports) expectedFieldTys patterns
+                  let (typedPatterns, varMaps) = unzip inferred
+                  pure (PatCon (TypedInfo location ctorResultTy maybeResolution') ctorIdent typedPatterns, M.unions varMaps)
 
          Just invalid ->
-            unreachableWith $ "Invalid constructor symbol at " ++ show loc ++ ": " ++ show invalid
+            unreachableWith $ "Invalid constructor symbol at " ++ show location ++ ": " ++ show invalid

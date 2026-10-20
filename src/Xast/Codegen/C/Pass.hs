@@ -45,46 +45,46 @@ codegenOne kira = do
    return CProgram {..}
 
 codegenFn :: KirFunction -> CCodegen CFunction
-codegenFn fn = do
-   let ty = typeToCType fn.retTy
-   let KirName name = fn.name
-   let args = [CFuncArg { ty = typeToCType p.ty, name = n } | p <- fn.params, let KirName n = p.name]
+codegenFn func = do
+   let ty = typeToCType func.retTy
+   let KirName name = func.name
+   let args = [CFuncArg { ty = typeToCType param.ty, name = paramName } | param <- func.params, let KirName paramName = param.name]
 
-   body <- codegenBlock fn.body
+   body <- codegenBlock func.body
 
    return CFunction {..}
 
 codegenSystem :: KirSystem -> CCodegen CFunction
-codegenSystem sys = do
+codegenSystem system = do
    let ty = CVoid
-   let KirName name = sys.name
+   let KirName name = system.name
    let args = [CFuncArg
          { ty = CPointer (CStruct "ecs_iter")
          , name = "it"
          }]
 
-   let bindingDecls = zipWith declareBinding [0..] sys.bindings
-   blockStmts <- codegenBlock sys.body
+   let bindingDecls = zipWith declareBinding [0..] system.bindings
+   blockStmts <- codegenBlock system.body
    let body = bindingDecls ++ blockStmts
 
    return CFunction {..}
 
 declareBinding :: Int -> KirBinding -> CStmt
-declareBinding n binding = 
+declareBinding index binding = 
    let bindingType = typeToCType binding.bindType
    in CDeclStmt 
       (CPointer bindingType) 
-      (bindingName (KirBindingId n)) 
+      (bindingName (KirBindingId index)) 
       (Just $
          CInvoke (CVar "ecs_field")
             [ CExprArg (CVar "it")
             , CTypeArg bindingType
-            , CExprArg (CIntLit (toInteger n))
+            , CExprArg (CIntLit (toInteger index))
             ]
       )
 
 bindingName :: KirBindingId -> Text
-bindingName (KirBindingId n) = "_b" <> T.pack (show n)
+bindingName (KirBindingId index) = "_b" <> T.pack (show index)
 
 codegenBlock :: KirBlock -> CCodegen [CStmt]
 codegenBlock block = do
@@ -92,7 +92,7 @@ codegenBlock block = do
    pure (stmts ++ codegenTerm block.term)
 
 codegenTerm :: KirTerm -> [CStmt]
-codegenTerm (KirReturn mv) = [CReturn (valueToExpr <$> mv)]
+codegenTerm (KirReturn maybeValue) = [CReturn (valueToExpr <$> maybeValue)]
 
 codegenInstructs :: [KirInstruct] -> CCodegen [CStmt]
 codegenInstructs = fmap concat . mapM codegenInstruct
@@ -101,15 +101,15 @@ codegenInstruct :: KirInstruct -> CCodegen [CStmt]
 codegenInstruct = \case
    KirCall retType (KirName fnName) callArgs (KirName resultName) ->
       pure [CDeclStmt (typeToCType retType) resultName (Just (CInvoke (CVar fnName) (map (CExprArg . valueToExpr) callArgs)))]
-   KirAssign bid val ->
-      pure [CExprStmt (CAssign (CVar (bindingName bid)) (valueToExpr val))]
-   KirStore ty dest val -> pure $ case dest of
-      DestLocal lid -> [CDeclStmt (typeToCType ty) (localName lid) (Just (valueToExpr val))]
-      DestBinding _ -> [assignToDest dest val]
+   KirAssign bindingId value ->
+      pure [CExprStmt (CAssign (CVar (bindingName bindingId)) (valueToExpr value))]
+   KirStore storedType dest value -> pure $ case dest of
+      DestLocal localId -> [CDeclStmt (typeToCType storedType) (localName localId) (Just (valueToExpr value))]
+      DestBinding _ -> [assignToDest dest value]
    KirField {} ->
       todo__ "payload field access needs an ADT layout in the C backend"
-   KirMatch { ty = ty, scrutinee = scrut, arms = arms, fallback = fallback, dest = dest, exhaustive = exhaustive } ->
-      codegenMatch ty scrut arms fallback dest exhaustive
+   KirMatch { ty = matchType, scrutinee = scrutinee, arms = arms, fallback = fallback, dest = dest, exhaustive = exhaustive } ->
+      codegenMatch matchType scrutinee arms fallback dest exhaustive
 
 codegenMatch
    :: Type
@@ -119,15 +119,15 @@ codegenMatch
    -> KirDest
    -> Bool
    -> CCodegen [CStmt]
-codegenMatch ty scrut arms fallback dest exhaustive = do
+codegenMatch matchType scrutinee arms fallback dest exhaustive = do
    armStmts <- if canSwitch then codegenSwitch else fromMaybe [] <$> goIf arms
    pure (declStmt ++ armStmts)
    where
-      scrutExpr = valueToExpr scrut
+      scrutExpr = valueToExpr scrutinee
 
       declStmt = case dest of
-         DestBinding _   -> []
-         DestLocal lid -> [CDeclStmt (typeToCType ty) (localName lid) Nothing]
+         DestBinding _     -> []
+         DestLocal localId -> [CDeclStmt (typeToCType matchType) (localName localId) Nothing]
 
       switchableTag (TagLit (LitInt _))  = True
       switchableTag (TagLit (LitChar _)) = True
@@ -169,27 +169,27 @@ codegenMatch ty scrut arms fallback dest exhaustive = do
       assignDest = assignToDest dest
 
 assignToDest :: KirDest -> KirValue -> CStmt
-assignToDest dest v = case dest of
-   DestBinding bid -> CExprStmt (CAssign (CUnary Deref (CVar (bindingName bid))) (valueToExpr v))
-   DestLocal lid   -> CExprStmt (CAssign (CVar (localName lid)) (valueToExpr v))
+assignToDest dest value = case dest of
+   DestBinding bindingId -> CExprStmt (CAssign (CUnary Deref (CVar (bindingName bindingId))) (valueToExpr value))
+   DestLocal localId     -> CExprStmt (CAssign (CVar (localName localId)) (valueToExpr value))
 
 localName :: KirLocalId -> Text
-localName (KirLocalId n) = "_l" <> T.pack (show n)
+localName (KirLocalId index) = "_l" <> T.pack (show index)
 
 valueToExpr :: KirValue -> CExpr
-valueToExpr (KirConst constTag)  = tagToExpr constTag
-valueToExpr (KirVar (KirName n)) = CVar n
-valueToExpr (KirBindingRef bid)  = CUnary Deref (CVar (bindingName bid))
-valueToExpr (KirLocalRef lid)    = CVar (localName lid)
+valueToExpr (KirConst constTag)       = tagToExpr constTag
+valueToExpr (KirVar (KirName name))   = CVar name
+valueToExpr (KirBindingRef bindingId) = CUnary Deref (CVar (bindingName bindingId))
+valueToExpr (KirLocalRef localId)     = CVar (localName localId)
 
 tagToExpr :: KirTag -> CExpr
 tagToExpr (TagLit lit) = literalToExpr lit
 tagToExpr (TagCtor ctor) = CVar ctor.inner
 
 literalToExpr :: Literal -> CExpr
-literalToExpr (LitInt n)   = CIntLit n.value
-literalToExpr (LitFloat f) = CFloatLit (realToFrac f)
-literalToExpr lit          = todo__ ("no C representation for literal " ++ show lit)
+literalToExpr (LitInt int)     = CIntLit int.value
+literalToExpr (LitFloat float) = CFloatLit (realToFrac float)
+literalToExpr lit              = todo__ ("no C representation for literal " ++ show lit)
 
 typeToCType :: Type -> CType
 typeToCType = \case

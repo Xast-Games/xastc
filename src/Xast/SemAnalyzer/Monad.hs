@@ -30,12 +30,12 @@ runPhase
    -> SymTable
    -> SemAnalyzer a
    -> Either [SemError] (a, SymTable, [SemWarning])
-runPhase env st phase =
-   let ((result, infos), st') = runIdentity (runSemAnalyzer env st phase)
-       errors   = [ e | SemError e <- infos ]
-       warnings = [ w | SemWarning w <- infos ]
+runPhase env symTable phase =
+   let ((result, reports), symTable') = runIdentity (runSemAnalyzer env symTable phase)
+       errors   = [ semError | SemError semError <- reports ]
+       warnings = [ semWarning | SemWarning semWarning <- reports ]
    in if null errors
-      then Right (result, st', warnings)
+      then Right (result, symTable', warnings)
       else Left errors
 
 errSem :: SemError -> SemAnalyzer ()

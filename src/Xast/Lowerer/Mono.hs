@@ -16,29 +16,29 @@ import Xast.Lowerer.Types
 splitApp :: Type -> (Type, [Type])
 splitApp = go []
    where
-      go acc (TyApp f x) = go (x : acc) f
-      go acc t           = (t, acc)
+      go accumulator (TyApp func arg) = go (arg : accumulator) func
+      go accumulator other            = (other, accumulator)
 
 subst :: M.Map Ident Type -> Type -> Type
-subst m = \case
-   TyGnr i    -> M.findWithDefault (TyGnr i) i m
-   TyApp a b  -> TyApp (subst m a) (subst m b)
-   TyTuple ts -> TyTuple (map (subst m) ts)
-   TyFn ps r  -> TyFn (map (subst m) ps) (subst m r)
-   t          -> t
+subst substitution = \case
+   TyGnr name         -> M.findWithDefault (TyGnr name) name substitution
+   TyApp func arg     -> TyApp (subst substitution func) (subst substitution arg)
+   TyTuple elements   -> TyTuple (map (subst substitution) elements)
+   TyFn params result -> TyFn (map (subst substitution) params) (subst substitution result)
+   other              -> other
 
 monoType :: Type -> Lowerer Type
-monoType t = case splitApp t of
-   (TyCon n, args) -> do
-      isUser <- gets (M.member n . (.typeTmpls))
+monoType type' = case splitApp type' of
+   (TyCon name, args) -> do
+      isUser <- gets (M.member name . (.typeTmpls))
       if not isUser then 
-         pure t
+         pure type'
       else do
          mapM_ monoType args
-         nm <- requestType (TypeInst n args)
-         pure (TyCon (Ident nm.text))
+         kirName <- requestType (TypeInst name args)
+         pure (TyCon (Ident kirName.text))
 
-   _ -> case t of
+   _ -> case type' of
       TyTuple [single] -> monoType single
       TyTuple elementTypes@(_ : _) -> do
          mapM_ monoType elementTypes
@@ -46,43 +46,43 @@ monoType t = case splitApp t of
          tupleKirName <- requestType tupleInst
          return $ TyCon (Ident tupleKirName.text)
 
-      TyFn ps r  -> TyFn <$> mapM monoType ps <*> monoType r
-      _          -> pure t
+      TyFn params result -> TyFn <$> mapM monoType params <*> monoType result
+      _                  -> pure type'
 
 requestType :: TypeInst -> Lowerer KirName
-requestType inst = gets (M.lookup inst . (.typeInsts)) >>= \case
-   Just nm -> pure nm
+requestType instance' = gets (M.lookup instance' . (.typeInsts)) >>= \case
+   Just existingName -> pure existingName
    Nothing -> do
-      let nm = KirName (mangle inst)
-      modify $ \s -> s
-         { typeInsts = M.insert inst nm s.typeInsts
-         , typeQueue = inst : s.typeQueue
+      let kirName = KirName (mangle instance')
+      modify $ \state -> state
+         { typeInsts = M.insert instance' kirName state.typeInsts
+         , typeQueue = instance' : state.typeQueue
          }
-      pure nm
+      pure kirName
 
 drainTypes :: Lowerer ()
 drainTypes = gets (.typeQueue) >>= \case
-   []            -> pure ()
-   (inst : rest) -> do
-      modify $ \s -> s { typeQueue = rest }
-      def <- buildTypeDef inst
-      tell [def]
+   []                 -> pure ()
+   (instance' : rest) -> do
+      modify $ \state -> state { typeQueue = rest }
+      typeDef <- buildTypeDef instance'
+      tell [typeDef]
       drainTypes
 
 buildTypeDef :: TypeInst -> Lowerer KirTypeDef
-buildTypeDef inst = case tupleArity inst.name of
-   Just arity -> buildTupleDef arity inst
-   Nothing    -> buildUserTypeDef inst
+buildTypeDef instance' = case tupleArity instance'.name of
+   Just arity -> buildTupleDef arity instance'
+   Nothing    -> buildUserTypeDef instance'
 
 buildTupleDef :: Int -> TypeInst -> Lowerer KirTypeDef
-buildTupleDef arity inst = do
-   unless (length inst.args == arity) $
-      error ("wrong number of elements for tuple type " ++ show inst.name)
+buildTupleDef arity instance' = do
+   unless (length instance'.args == arity) $
+      error ("wrong number of elements for tuple type " ++ show instance'.name)
 
-   fieldTypes <- mapM monoType inst.args
+   fieldTypes <- mapM monoType instance'.args
    let fieldNames = map tupleFieldName [0 ..]
    let fields = zipWith (\name fieldType -> KirFieldDef { name = name, ty = fieldType }) fieldNames fieldTypes
-   let mangledName = mangle inst
+   let mangledName = mangle instance'
    let ctor = KirCtor { name = Ident mangledName, fields = fields }
 
    return KirTypeDef
@@ -99,54 +99,54 @@ tupleArity name = do
    readMaybe (T.unpack digits)
 
 buildUserTypeDef :: TypeInst -> Lowerer KirTypeDef
-buildUserTypeDef inst = do
-   tpl <- gets (M.lookup inst.name . (.typeTmpls)) >>= \case
-      Just tpl -> pure tpl
-      Nothing  -> error ("no template for type " ++ show inst.name)
+buildUserTypeDef instance' = do
+   template <- gets (M.lookup instance'.name . (.typeTmpls)) >>= \case
+      Just found -> pure found
+      Nothing    -> error ("no template for type " ++ show instance'.name)
 
-   unless (length tpl.generics == length inst.args) $
-      error ("wrong number of type arguments for type " ++ show inst.name)
+   unless (length template.generics == length instance'.args) $
+      error ("wrong number of type arguments for type " ++ show instance'.name)
 
-   let sub = M.fromList (zip tpl.generics inst.args)
-   ctors <- forM tpl.ctors $ \c -> do
-      fields <- forM (payloadFields c.payload) $ \(fieldName, fieldType) -> do
-         monoFieldType <- monoType (subst sub fieldType)
+   let substitution = M.fromList (zip template.generics instance'.args)
+   ctors <- forM template.ctors $ \ctor -> do
+      fields <- forM (payloadFields ctor.payload) $ \(fieldName, fieldType) -> do
+         monoFieldType <- monoType (subst substitution fieldType)
          pure KirFieldDef { name = fieldName, ty = monoFieldType }
       pure KirCtor
-         { name   = mangleCtor (foldl TyApp (TyCon inst.name) inst.args) c.name
+         { name   = mangleCtor (foldl TyApp (TyCon instance'.name) instance'.args) ctor.name
          , fields = fields
          }
    
    return KirTypeDef 
-      { name = KirName (mangle inst)
+      { name = KirName (mangle instance')
       , ctors = ctors 
       }
 
 mangleCtor :: Type -> Ident -> Ident
-mangleCtor resTy c = Ident (mangle (TypeInst c (snd (splitApp resTy))))
+mangleCtor resultType ctorName = Ident (mangle (TypeInst ctorName (snd (splitApp resultType))))
 
 ctorResultTy :: Type -> Type
 ctorResultTy = \case
-   TyFn _ r -> r
-   t        -> t
+   TyFn _ result -> result
+   other         -> other
 
 mangle :: TypeInst -> Text
-mangle inst = T.intercalate "_" (inst.name.inner : map mangleArg inst.args)
+mangle instance' = T.intercalate "_" (instance'.name.inner : map mangleArg instance'.args)
 
 mangleArg :: Type -> Text
-mangleArg t = case splitApp t of
-   (TyCon i, [])   -> i.inner
-   (TyCon i, args) -> wrap (mangle (TypeInst i args))
-   _ -> case t of
-      TyTuple ts -> wrap (mangle (TypeInst (tupleName (length ts)) ts))
-      TyFn ps r  -> wrap (joinToken ("fn"  <> tshow (length ps)) (ps ++ [r]))
-      _          -> error ("mangling: unexpected type " ++ show t)
+mangleArg type' = case splitApp type' of
+   (TyCon name, [])   -> name.inner
+   (TyCon name, args) -> wrap (mangle (TypeInst name args))
+   _                  -> case type' of
+      TyTuple elements   -> wrap (mangle (TypeInst (tupleName (length elements)) elements))
+      TyFn params result -> wrap (joinToken ("fn"  <> tshow (length params)) (params ++ [result]))
+      _                  -> error ("mangling: unexpected type " ++ show type')
 
 wrap :: Text -> Text
-wrap s = "_" <> s <> "_"
+wrap text = "_" <> text <> "_"
 
 joinToken :: Text -> [Type] -> Text
-joinToken m ts = T.intercalate "_" (m : map mangleArg ts)
+joinToken prefix types = T.intercalate "_" (prefix : map mangleArg types)
 
 tshow :: Int -> Text
 tshow = T.pack . show

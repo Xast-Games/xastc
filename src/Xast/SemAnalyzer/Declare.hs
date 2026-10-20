@@ -20,70 +20,70 @@ qualify ident = do
    return (QualifiedName module_ ident)
 
 enterModule :: ModuleDef -> SemAnalyzer ()
-enterModule (ModuleDef _ m _) = do
-   st <- get
+enterModule (ModuleDef _ moduleName _) = do
+   symTable <- get
 
-   case M.lookup m st.modules of
+   case M.lookup moduleName symTable.modules of
       Just _ -> pure ()
       Nothing ->
-         put st
-            { modules = M.insert m emptyModuleInfo st.modules
+         put symTable
+            { modules = M.insert moduleName emptyModuleInfo symTable.modules
             }
 
 declareStmts :: Program Parsed -> SemAnalyzer ()
-declareStmts (Program md@(ModuleDef _ m _) _ stmts _) = do
-   enterModule md
-   modify $ \st -> st { currentModule = m }
+declareStmts (Program moduleDef@(ModuleDef _ moduleName _) _ stmts _) = do
+   enterModule moduleDef
+   modify $ \symTable -> symTable { currentModule = moduleName }
    forM_ stmts declareStmt
 
 declareStmt :: Stmt Parsed -> SemAnalyzer ()
 declareStmt = \case
-   StmtFunc (FnDef fd@(FuncDef _ _ ident _ _)) ->
-      declareFn ident fd
+   StmtFunc (FnDef funcDef@(FuncDef _ _ ident _ _)) ->
+      declareFn ident funcDef
 
-   StmtTypeDef td@(TypeDef _ _ ident _ _) ->
-      declareType ident td
+   StmtTypeDef typeDef@(TypeDef _ _ ident _ _) ->
+      declareType ident typeDef
 
-   StmtExtern (ExtFunc ef@(ExternFunc _ _ ident _ _)) ->
-      declareExternFn ident ef
+   StmtExtern (ExtFunc externFunc@(ExternFunc _ _ ident _ _)) ->
+      declareExternFn ident externFunc
 
-   StmtExtern (ExtType et@(ExternType _ ident _)) ->
-      declareExternType ident et
+   StmtExtern (ExtType externType@(ExternType _ ident _)) ->
+      declareExternType ident externType
 
-   StmtSystem (SysDef sd@(SystemDef _ _ ident _ _ _)) ->
-      declareSystem ident sd
+   StmtSystem (SysDef systemDef@(SystemDef _ _ ident _ _ _)) ->
+      declareSystem ident systemDef
 
    _ -> return ()
 
 type RedeclarationError = (Ident -> Location -> Location -> SemError)
 
 declareSymbol :: Ident -> SymbolInfo -> RedeclarationError -> SemAnalyzer ()
-declareSymbol ident sym re = do
-   QualifiedName m _ <- qualify ident
-   st <- get
-   let mi = M.findWithDefault emptyModuleInfo m st.modules
+declareSymbol ident symbol redeclarationError = do
+   QualifiedName moduleName _ <- qualify ident
+   symTable <- get
+   let moduleInfo = M.findWithDefault emptyModuleInfo moduleName symTable.modules
 
-   case M.lookup ident mi.symbols of
-      Just old ->
-         errSem (re ident (symbolLoc old) (symbolLoc sym))
+   case M.lookup ident moduleInfo.symbols of
+      Just oldSymbol ->
+         errSem (redeclarationError ident (symbolLoc oldSymbol) (symbolLoc symbol))
 
       Nothing ->
-         put st
+         put symTable
             { modules =
-                  M.insert m
-                     mi { symbols = M.insert ident sym mi.symbols }
-                     st.modules
+                  M.insert moduleName
+                     moduleInfo { symbols = M.insert ident symbol moduleInfo.symbols }
+                     symTable.modules
             }
 
 declareFn :: Ident -> FuncDef -> SemAnalyzer ()
-declareFn ident fd@(FuncDef loc _ fnIdent fnArgs _) = do
+declareFn ident funcDef@(FuncDef loc _ fnIdent fnArgs _) = do
    -- Report function gayness
-   let args = length fnArgs
-   when (args > 6) $
-      warnSem (SWFunctionGayness loc fnIdent args)
+   let argsCount = length fnArgs
+   when (argsCount > 6) $
+      warnSem (SWFunctionGayness loc fnIdent argsCount)
 
-   fid <- freshFunctionId
-   declareSymbol ident (SymbolFn loc fid (funcSig fd)) SEFnRedeclaration
+   functionId <- freshFunctionId
+   declareSymbol ident (SymbolFn loc functionId (funcSig funcDef)) SEFnRedeclaration
 
 declareType :: Ident -> TypeDef -> SemAnalyzer ()
 declareType ident (TypeDef loc modifiers _ generics ctors) = do
@@ -92,36 +92,36 @@ declareType ident (TypeDef loc modifiers _ generics ctors) = do
 
    case [ctor | ctor <- ctors, ctor.name == ident] of
       [selfCtor] -> do
-         let (fieldNames, fieldTys) = payloadFields selfCtor.payload
-         cid <- freshConstructorId
+         let (fieldNames, fieldTypes) = payloadFields selfCtor.payload
+         constructorId <- freshConstructorId
          declareSymbol ident
-               (SymbolTypeCtor loc typeSig cid (CtorSig ident generics fieldNames fieldTys))
+               (SymbolTypeCtor loc typeSig constructorId (CtorSig ident generics fieldNames fieldTypes))
                SETypeRedeclaration
       _ ->
          declareSymbol ident (SymbolType loc typeSig) SETypeRedeclaration
 
    forM_ ctors $ \ctor ->
       unless (ctor.name == ident) $ do
-         let (fieldNames, fieldTys) = payloadFields ctor.payload
-         cid <- freshConstructorId
+         let (fieldNames, fieldTypes) = payloadFields ctor.payload
+         constructorId <- freshConstructorId
          declareSymbol ctor.name
-               (SymbolCtor ctor.location cid (CtorSig ident generics fieldNames fieldTys))
+               (SymbolCtor ctor.location constructorId (CtorSig ident generics fieldNames fieldTypes))
                SECtorRedeclaration
    where
       payloadFields = \case
          PUnit -> (Nothing, [])
-         (PTuple tys) -> (Nothing, map (.node) tys)
-         (PRecord fs) -> (Just (map (.name) fs), map ((.node) . (.ty)) fs)
+         (PTuple types) -> (Nothing, map (.node) types)
+         (PRecord fields) -> (Just (map (.name) fields), map ((.node) . (.ty)) fields)
 
 declareExternFn :: Ident -> ExternFunc -> SemAnalyzer ()
-declareExternFn ident ef@(ExternFunc loc _ _ _ _) = do
-   eid <- freshExternId
-   declareSymbol ident (SymbolExternFn loc eid (externFuncSig ef)) SEExternFnRedeclaration
+declareExternFn ident externFunc@(ExternFunc loc _ _ _ _) = do
+   externId <- freshExternId
+   declareSymbol ident (SymbolExternFn loc externId (externFuncSig externFunc)) SEExternFnRedeclaration
 
 declareExternType :: Ident -> ExternType -> SemAnalyzer ()
 declareExternType ident (ExternType loc _ _) =
    declareSymbol ident (SymbolExternType loc) SEExternTypeRedeclaration
 
 declareSystem :: Ident -> SystemDef -> SemAnalyzer ()
-declareSystem ident sd@(SystemDef loc _ _ _ _ _) =
-   declareSymbol ident (SymbolSystem loc (systemSig sd)) SESystemRedeclaration
+declareSystem ident systemDef@(SystemDef loc _ _ _ _ _) =
+   declareSymbol ident (SymbolSystem loc (systemSig systemDef)) SESystemRedeclaration

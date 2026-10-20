@@ -22,220 +22,220 @@ inferType
    :: [Located ImportDef]
    -> Expr Resolved
    -> SemAnalyzer (Expr Typed)
-inferType imps expr = case expr of
-   ExpLit (ResolvedInfo loc mRes) literal -> do
-      ty <- literalType literal
-      pure $ ExpLit (TypedInfo loc ty mRes) literal
+inferType imports expression = case expression of
+   ExpLit (ResolvedInfo location maybeResolution) literal -> do
+      exprType <- literalType literal
+      pure $ ExpLit (TypedInfo location exprType maybeResolution) literal
 
-   ExpVar (ResolvedInfo loc mRes) Nothing x -> do
-      thisSym <- lookupLocal x
-      modSym  <- lookupCurrentModule x
-      impSym  <- lookupUnqualifiedSymbol imps x
-      ty <- case thisSym of
-         Just vi -> do
-            t     <- resolve vi.ty
-            fresh <- mapM (const freshTyVar) vi.quantified
-            pure (substTyVars (M.fromList (zip vi.quantified fresh)) t)
-         Nothing -> case modSym <|> impSym of
-            Just (SymbolFn _ _ sig)       -> instantiate sig
-            Just (SymbolExternFn _ _ sig) -> instantiate sig
-            _ -> do
-               errSem (SEUndefinedVar loc x)
+   ExpVar (ResolvedInfo location maybeResolution) Nothing name -> do
+      localSymbol <- lookupLocal name
+      moduleSymbol  <- lookupCurrentModule name
+      importedSymbol  <- lookupUnqualifiedSymbol imports name
+      exprType <- case localSymbol of
+         Just varInfo -> do
+            varType     <- resolve varInfo.ty
+            fresh <- mapM (const freshTyVar) varInfo.quantified
+            pure (substTyVars (M.fromList (zip varInfo.quantified fresh)) varType)
+         Nothing -> case moduleSymbol <|> importedSymbol of
+            Just (SymbolFn _ _ signature)       -> instantiate signature
+            Just (SymbolExternFn _ _ signature) -> instantiate signature
+            _                                   -> do
+               errSem (SEUndefinedVar location name)
                pure TyInvalid
-      pure $ ExpVar (TypedInfo loc ty mRes) Nothing x
+      pure $ ExpVar (TypedInfo location exprType maybeResolution) Nothing name
 
-   ExpVar (ResolvedInfo loc mRes) (Just alias) x -> do
-      sym <- lookupQualifiedSymbol imps alias x
-      ty <- case sym of
-         Just (SymbolFn _ _ sig)       -> instantiate sig
-         Just (SymbolExternFn _ _ sig) -> instantiate sig
-         _ -> do
-            errSem (SEUndefinedVar loc x)
+   ExpVar (ResolvedInfo location maybeResolution) (Just alias) name -> do
+      symbol <- lookupQualifiedSymbol imports alias name
+      exprType <- case symbol of
+         Just (SymbolFn _ _ signature)       -> instantiate signature
+         Just (SymbolExternFn _ _ signature) -> instantiate signature
+         _                                   -> do
+            errSem (SEUndefinedVar location name)
             pure TyInvalid
-      pure $ ExpVar (TypedInfo loc ty mRes) (Just alias) x
+      pure $ ExpVar (TypedInfo location exprType maybeResolution) (Just alias) name
 
-   ExpCon (ResolvedInfo loc mRes) Nothing x -> do
-      modCon <- lookupCurrentConstructor x
-      impCon <- lookupUnqualifiedConstructor imps x
-      ty <- case modCon <|> impCon of
-         Just sym -> ctorType loc sym
-         Nothing  -> do
-            errSem (SEUndefinedCon loc x)
+   ExpCon (ResolvedInfo location maybeResolution) Nothing name -> do
+      moduleCtor <- lookupCurrentConstructor name
+      importedCtor <- lookupUnqualifiedConstructor imports name
+      exprType <- case moduleCtor <|> importedCtor of
+         Just symbol -> ctorType location symbol
+         Nothing     -> do
+            errSem (SEUndefinedCon location name)
             pure TyInvalid
-      pure $ ExpCon (TypedInfo loc ty mRes) Nothing x
+      pure $ ExpCon (TypedInfo location exprType maybeResolution) Nothing name
 
-   ExpCon (ResolvedInfo loc mRes) (Just alias) x -> do
-      con <- lookupQualifiedConstructor imps alias x
-      ty <- case con of
-         Just sym -> ctorType loc sym
-         Nothing  -> do
-            errSem (SEUndefinedCon loc x)
+   ExpCon (ResolvedInfo location maybeResolution) (Just alias) name -> do
+      ctor <- lookupQualifiedConstructor imports alias name
+      exprType <- case ctor of
+         Just symbol -> ctorType location symbol
+         Nothing     -> do
+            errSem (SEUndefinedCon location name)
             pure TyInvalid
-      pure $ ExpCon (TypedInfo loc ty mRes) (Just alias) x
+      pure $ ExpCon (TypedInfo location exprType maybeResolution) (Just alias) name
 
-   ExpApp (ResolvedInfo loc mRes) applicant operand -> do
-      applicant' <- inferType imps applicant
-      operand'   <- inferType imps operand
-      ty <- applyTypes loc (typeOf applicant') (typeOf operand')
-      pure $ ExpApp (TypedInfo loc ty mRes) applicant' operand'
+   ExpApp (ResolvedInfo location maybeResolution) applicant operand -> do
+      applicant' <- inferType imports applicant
+      operand'   <- inferType imports operand
+      exprType <- applyTypes location (typeOf applicant') (typeOf operand')
+      pure $ ExpApp (TypedInfo location exprType maybeResolution) applicant' operand'
 
-   ExpTuple (ResolvedInfo loc mRes) xs -> do
-      xs' <- mapM (inferType imps) xs
-      pure $ ExpTuple (TypedInfo loc (TyTuple (map typeOf xs')) mRes) xs'
+   ExpTuple (ResolvedInfo location maybeResolution) elements -> do
+      typedElements <- mapM (inferType imports) elements
+      pure $ ExpTuple (TypedInfo location (TyTuple (map typeOf typedElements)) maybeResolution) typedElements
 
-   ExpList (ResolvedInfo loc mRes) [] -> do
-      ty <- TyApp (TyCon (Ident "List")) <$> freshTyVar
-      pure $ ExpList (TypedInfo loc ty mRes) []
+   ExpList (ResolvedInfo location maybeResolution) [] -> do
+      exprType <- TyApp (TyCon (Ident "List")) <$> freshTyVar
+      pure $ ExpList (TypedInfo location exprType maybeResolution) []
 
-   ExpList (ResolvedInfo loc mRes) (x:xs) -> do
-      x' <- inferType imps x
-      xs' <- mapM (inferType imps) xs
+   ExpList (ResolvedInfo location maybeResolution) (first:rest) -> do
+      typedFirst <- inferType imports first
+      typedRest <- mapM (inferType imports) rest
       -- Check inner list types
-      forM_ xs' $ \other ->
+      forM_ typedRest $ \other ->
          compareListElems 
-            (exprAnnotation x').location (typeOf x')
+            (exprAnnotation typedFirst).location (typeOf typedFirst)
             (exprAnnotation other).location (typeOf other)
       -- Type of list is defined as `List a`,
       -- where a is a type of the first element
-      let ty = TyApp (TyCon (Ident "List")) (typeOf x')
-      pure $ ExpList (TypedInfo loc ty mRes) (x':xs')
+      let exprType = TyApp (TyCon (Ident "List")) (typeOf typedFirst)
+      pure $ ExpList (TypedInfo location exprType maybeResolution) (typedFirst:typedRest)
 
-   ExpIfThen (ResolvedInfo loc mRes) (IfThenElse if' then' else') -> do
+   ExpIfThen (ResolvedInfo location maybeResolution) (IfThenElse condition thenBranch elseBranch) -> do
       -- Compare `if` type with Bool
-      if'' <- inferType imps if'
-      compareTypes (exprAnnotation if'').location (typeOf if'') boolType
+      typedCondition <- inferType imports condition
+      compareTypes (exprAnnotation typedCondition).location (typeOf typedCondition) boolType
       -- Compare `then` and `else` types
-      then'' <- inferType imps then'
-      else'' <- inferType imps else'
-      compareThenElse (exprAnnotation then'').location (typeOf then'') (exprAnnotation else'').location (typeOf else'')
-      -- Type of the whole expr is the type of the `then` block
-      pure $ ExpIfThen (TypedInfo loc (typeOf then'') mRes) (IfThenElse if'' then'' else'')
+      typedThen <- inferType imports thenBranch
+      typedElse <- inferType imports elseBranch
+      compareThenElse (exprAnnotation typedThen).location (typeOf typedThen) (exprAnnotation typedElse).location (typeOf typedElse)
+      -- Type of the whole expression is the type of the `then` block
+      pure $ ExpIfThen (TypedInfo location (typeOf typedThen) maybeResolution) (IfThenElse typedCondition typedThen typedElse)
 
-   ExpLetIn (ResolvedInfo loc mRes) (LetIn binds body) -> do
-      (binds', body') <- typeLetBinds imps binds body
-      pure $ ExpLetIn (TypedInfo loc (typeOf body') mRes) (LetIn binds' body')
+   ExpLetIn (ResolvedInfo location maybeResolution) (LetIn bindings body) -> do
+      (typedBinds, typedBody) <- typeLetBinds imports bindings body
+      pure $ ExpLetIn (TypedInfo location (typeOf typedBody) maybeResolution) (LetIn typedBinds typedBody)
 
-   ExpMatch (ResolvedInfo loc mRes) (Match mtExp mtMatches _) -> do
-      mtExp' <- inferType imps mtExp
-      wings <- forM mtMatches $ \(MatchWing pat branch) -> do
-         (pat', patVars) <- inferPattern imps (typeOf mtExp') pat
-         branch' <- withVars patVars (inferType imps branch)
-         pure (MatchWing pat' branch', typeOf branch')
-      ty <- case wings of
+   ExpMatch (ResolvedInfo location maybeResolution) (Match scrutinee matches _) -> do
+      typedScrutinee <- inferType imports scrutinee
+      typedWings <- forM matches $ \(MatchWing pattern branch) -> do
+         (typedPattern, patternVars) <- inferPattern imports (typeOf typedScrutinee) pattern
+         typedBranch <- withVars patternVars (inferType imports branch)
+         pure (MatchWing typedPattern typedBranch, typeOf typedBranch)
+      exprType <- case typedWings of
          [] -> pure TyInvalid
-         ((_, t):rest) -> do
-            forM_ rest (unify loc t . snd)
-            resolve t
-      scrutTy <- resolve (typeOf mtExp')
-      isExhaustive <- checkMatchExhaustive loc scrutTy (map (patOf . fst) wings)
-      pure $ ExpMatch (TypedInfo loc ty mRes) (Match mtExp' (map fst wings) isExhaustive)
+         ((_, firstType):rest) -> do
+            forM_ rest (unify location firstType . snd)
+            resolve firstType
+      scrutineeType <- resolve (typeOf typedScrutinee)
+      isExhaustive <- checkMatchExhaustive location scrutineeType (map (patOf . fst) typedWings)
+      pure $ ExpMatch (TypedInfo location exprType maybeResolution) (Match typedScrutinee (map fst typedWings) isExhaustive)
 
-   ExpLambda (ResolvedInfo loc mRes) (Lambda args body) -> do
-      argTyVars <- forM args $ const freshTyVar
-      inferred  <- zipWithM (inferPattern imps) argTyVars args
-      let (args', argVarMaps) = unzip inferred
+   ExpLambda (ResolvedInfo location maybeResolution) (Lambda args body) -> do
+      argTypeVars <- forM args $ const freshTyVar
+      inferred  <- zipWithM (inferPattern imports) argTypeVars args
+      let (typedArgs, argVarMaps) = unzip inferred
       let argVars = M.unions argVarMaps
 
-      body' <- withVars argVars (inferType imps body)
+      typedBody <- withVars argVars (inferType imports body)
 
-      argTyVars' <- mapM resolve argTyVars
-      let ty = TyFn argTyVars' (typeOf body')
-      pure $ ExpLambda (TypedInfo loc ty mRes) (Lambda args' body')
+      resolvedArgTypes <- mapM resolve argTypeVars
+      let exprType = TyFn resolvedArgTypes (typeOf typedBody)
+      pure $ ExpLambda (TypedInfo location exprType maybeResolution) (Lambda typedArgs typedBody)
 
-   ExpRecConstruct (ResolvedInfo loc mRes) (RecConstruct rcBind rcCon rcAssigns) -> do
-      sym <- case rcBind of
+   ExpRecConstruct (ResolvedInfo location maybeResolution) (RecConstruct bindAlias ctorName assigns) -> do
+      maybeSymbol <- case bindAlias of
          Nothing -> do
-            modCon <- lookupCurrentConstructor rcCon
-            impCon <- lookupUnqualifiedConstructor imps rcCon
-            pure (modCon <|> impCon)
-         Just alias -> lookupQualifiedConstructor imps alias rcCon
+            moduleCtor <- lookupCurrentConstructor ctorName
+            importedCtor <- lookupUnqualifiedConstructor imports ctorName
+            pure (moduleCtor <|> importedCtor)
+         Just alias -> lookupQualifiedConstructor imports alias ctorName
 
-      (ty, rcAssigns') <- case sym of
-         Just s@(SymbolCtor _ _ (CtorSig _ _ mFieldNames _)) -> do
-            resultTy <- ctorType loc s
-            let (fieldTys, ctorResultTy) = case resultTy of
-                  TyFn args r -> (args, r)
-                  r           -> ([], r)
-                fieldTypeOf fld = lookup fld (zip (fromMaybe [] mFieldNames) fieldTys)
-            assigns' <- forM rcAssigns $ \(RecAssign fldName value) -> do
-               value' <- inferType imps value
-               case fieldTypeOf fldName.node of
-                  Just expectedTy -> compareTypes loc expectedTy (typeOf value')
-                  Nothing         -> errSem (SEUnknownField loc rcCon fldName.node)
-               pure $ RecAssign fldName value'
-            pure (ctorResultTy, assigns')
+      (exprType, typedAssigns) <- case maybeSymbol of
+         Just symbol@(SymbolCtor _ _ (CtorSig _ _ maybeFieldNames _)) -> do
+            resultType <- ctorType location symbol
+            let (fieldTypes, ctorResultTy) = case resultType of
+                  TyFn args result -> (args, result)
+                  result           -> ([], result)
+                fieldTypeOf field = lookup field (zip (fromMaybe [] maybeFieldNames) fieldTypes)
+            typedFieldAssigns <- forM assigns $ \(RecAssign fieldName value) -> do
+               typedValue <- inferType imports value
+               case fieldTypeOf fieldName.node of
+                  Just expectedType -> compareTypes location expectedType (typeOf typedValue)
+                  Nothing           -> errSem (SEUnknownField location ctorName fieldName.node)
+               pure $ RecAssign fieldName typedValue
+            pure (ctorResultTy, typedFieldAssigns)
 
          _ -> do
-            errSem (SEUndefinedCon loc rcCon)
-            assigns' <- forM rcAssigns $ \(RecAssign fldName value) -> do
-               value' <- inferType imps value
-               pure $ RecAssign fldName value'
-            pure (TyInvalid, assigns')
+            errSem (SEUndefinedCon location ctorName)
+            typedFieldAssigns <- forM assigns $ \(RecAssign fieldName value) -> do
+               typedValue <- inferType imports value
+               pure $ RecAssign fieldName typedValue
+            pure (TyInvalid, typedFieldAssigns)
 
-      pure $ ExpRecConstruct (TypedInfo loc ty mRes) (RecConstruct rcBind rcCon rcAssigns')
+      pure $ ExpRecConstruct (TypedInfo location exprType maybeResolution) (RecConstruct bindAlias ctorName typedAssigns)
 
-   ExpRecUpdate (ResolvedInfo loc mRes) (RecUpdate ruBase ruAssigns) -> do
-      ruBase' <- inferType imps ruBase
-      baseTy  <- resolve (typeOf ruBase')
-      fields  <- recordFieldsOf imps loc baseTy
+   ExpRecUpdate (ResolvedInfo location maybeResolution) (RecUpdate base assigns) -> do
+      typedBase <- inferType imports base
+      baseType  <- resolve (typeOf typedBase)
+      fields  <- recordFieldsOf imports location baseType
 
-      ruAssigns' <- forM ruAssigns $ \(RecAssign fldName value) -> do
-         value' <- inferType imps value
+      typedAssigns <- forM assigns $ \(RecAssign fieldName value) -> do
+         typedValue <- inferType imports value
          case fields of
-            Just (con, fieldNames, fieldTys) ->
-               case lookup fldName.node (zip fieldNames fieldTys) of
-                  Just expectedTy -> compareTypes loc expectedTy (typeOf value')
-                  Nothing         -> errSem (SEUnknownField loc con fldName.node)
+            Just (ctor, fieldNames, fieldTypes) ->
+               case lookup fieldName.node (zip fieldNames fieldTypes) of
+                  Just expectedType -> compareTypes location expectedType (typeOf typedValue)
+                  Nothing           -> errSem (SEUnknownField location ctor fieldName.node)
             Nothing -> pure ()
-         pure $ RecAssign fldName value'
+         pure $ RecAssign fieldName typedValue
 
-      pure $ ExpRecUpdate (TypedInfo loc baseTy mRes) (RecUpdate ruBase' ruAssigns')
+      pure $ ExpRecUpdate (TypedInfo location baseType maybeResolution) (RecUpdate typedBase typedAssigns)
 
-   ExpVarGetter (ResolvedInfo loc mRes) baseExpr getter -> do
-      baseExpr' <- inferType imps baseExpr
-      baseTy    <- resolve (typeOf baseExpr')
-      ty <- case getter of
-         GetField fld -> do
-            fields <- recordFieldsOf imps loc baseTy
+   ExpVarGetter (ResolvedInfo location maybeResolution) baseExpression getter -> do
+      typedBaseExpression <- inferType imports baseExpression
+      baseType    <- resolve (typeOf typedBaseExpression)
+      exprType <- case getter of
+         GetField field -> do
+            fields <- recordFieldsOf imports location baseType
             case fields of
-               Just (con, fieldNames, fieldTys) ->
-                  case lookup fld (zip fieldNames fieldTys) of
-                     Just fldTy -> pure fldTy
-                     Nothing    -> errSem (SEUnknownField loc con fld) >> pure TyInvalid
+               Just (ctor, fieldNames, fieldTypes) ->
+                  case lookup field (zip fieldNames fieldTypes) of
+                     Just fieldType -> pure fieldType
+                     Nothing        -> errSem (SEUnknownField location ctor field) >> pure TyInvalid
                Nothing -> pure TyInvalid  -- recordFieldsOf already reported why
 
-         GetTupleField idx -> case baseTy of
-            TyTuple tys | idx >= 0 && idx < length tys -> pure (tys !! idx)
-            _ -> errSem (SEInvalidTupleIndex loc baseTy idx) >> pure TyInvalid
+         GetTupleField index -> case baseType of
+            TyTuple elementTypes | index >= 0 && index < length elementTypes -> pure (elementTypes !! index)
+            _ -> errSem (SEInvalidTupleIndex location baseType index) >> pure TyInvalid
 
-      pure $ ExpVarGetter (TypedInfo loc ty mRes) baseExpr' getter
+      pure $ ExpVarGetter (TypedInfo location exprType maybeResolution) typedBaseExpression getter
 
 recordFieldsOf :: [Located ImportDef] -> Location -> Type -> SemAnalyzer (Maybe (Ident, [Ident], [Type]))
-recordFieldsOf imps loc ty = case typeHead ty of
+recordFieldsOf imports location recordType = case typeHead recordType of
    Nothing -> do
-      errSem (SENotARecordType loc ty)
+      errSem (SENotARecordType location recordType)
       pure Nothing
-   Just conIdent -> do
-      modCon <- lookupCurrentConstructor conIdent
-      impCon <- lookupUnqualifiedConstructor imps conIdent
-      case modCon <|> impCon of
-         Just s@(SymbolCtor _ _ (CtorSig _ _ (Just fieldNames) _)) -> do
-            modTy <- lookupCurrentConType conIdent
-            impTy <- lookupUnqualifiedConType imps conIdent
-            case modTy <|> impTy of
+   Just ctorName -> do
+      moduleCtor <- lookupCurrentConstructor ctorName
+      importedCtor <- lookupUnqualifiedConstructor imports ctorName
+      case moduleCtor <|> importedCtor of
+         Just symbol@(SymbolCtor _ _ (CtorSig _ _ (Just fieldNames) _)) -> do
+            moduleType <- lookupCurrentConType ctorName
+            importedType <- lookupUnqualifiedConType imports ctorName
+            case moduleType <|> importedType of
                Just (SymbolType _ (TypeSig ctors _ _)) | S.size ctors > 1 -> do
-                  errSem (SEAmbiguousRecordAccess loc conIdent (S.toList (S.delete conIdent ctors)))
+                  errSem (SEAmbiguousRecordAccess location ctorName (S.toList (S.delete ctorName ctors)))
                   pure Nothing
                _ -> do
-                  resultTy <- ctorType loc s
-                  let (fieldTys, ctorResultTy) = case resultTy of
-                        TyFn args r -> (args, r)
-                        r           -> ([], r)
-                  unify loc ctorResultTy ty
-                  fieldTys' <- mapM resolve fieldTys
-                  pure $ Just (conIdent, fieldNames, fieldTys')
+                  resultType <- ctorType location symbol
+                  let (fieldTypes, ctorResultTy) = case resultType of
+                        TyFn args result -> (args, result)
+                        result           -> ([], result)
+                  unify location ctorResultTy recordType
+                  resolvedFieldTypes <- mapM resolve fieldTypes
+                  pure $ Just (ctorName, fieldNames, resolvedFieldTypes)
          _ -> do
-            errSem (SENotARecordType loc ty)
+            errSem (SENotARecordType location recordType)
             pure Nothing
 
 typeLetBinds
@@ -243,15 +243,15 @@ typeLetBinds
    -> [Let Resolved]
    -> Expr Resolved
    -> SemAnalyzer ([Let Typed], Expr Typed)
-typeLetBinds imps [] body = ([],) <$> inferType imps body
-typeLetBinds imps (Let pat value : rest) body = do
-   value'  <- inferType imps value
-   (pat', patVars) <- inferPattern imps (typeOf value') pat
-   patVars' <- case pat of
-      PatVar {} -> forM patVars $ \vi -> do
-         qs <- generalize vi.ty
-         pure vi { quantified = qs }
-      _ -> pure patVars
+typeLetBinds imports [] body = ([],) <$> inferType imports body
+typeLetBinds imports (Let pattern value : rest) body = do
+   typedValue  <- inferType imports value
+   (typedPattern, patternVars) <- inferPattern imports (typeOf typedValue) pattern
+   generalizedVars <- case pattern of
+      PatVar {} -> forM patternVars $ \varInfo -> do
+         quantifiedVars <- generalize varInfo.ty
+         pure varInfo { quantified = quantifiedVars }
+      _ -> pure patternVars
 
-   (rest', body') <- withVars patVars' (typeLetBinds imps rest body)
-   pure (Let pat' value' : rest', body')
+   (typedRest, typedBody) <- withVars generalizedVars (typeLetBinds imports rest body)
+   pure (Let typedPattern typedValue : typedRest, typedBody)

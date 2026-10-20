@@ -106,6 +106,21 @@ data Program a = Program
 
 type ModBind = Maybe Ident
 
+-- | Name of a local or global variable or function.
+type VarName = Ident
+-- | Name of a type.
+type TypeName = Ident
+-- | Name of a data constructor.
+type CtorName = Ident
+-- | Name of a record field.
+type FieldName = Ident
+-- | Name of a generic type parameter.
+type GenericName = Ident
+-- | Name of a function.
+type FunctionName = Ident
+-- | Name of a system.
+type SystemName = Ident
+
 newtype Parsed = ParsedInfo
    { location :: Location
    }
@@ -145,13 +160,13 @@ data Desugared = DesugaredInfo
 desugaredAnn :: Typed -> Desugared
 desugaredAnn ti = DesugaredInfo ti.ty ti.res
 
-newtype LocalId = LocalId Int
+newtype LocalId = LocalId { inner :: Int }
    deriving (Eq, Ord, Show)
-newtype FunctionId = FunctionId Int
+newtype FunctionId = FunctionId { inner :: Int }
    deriving (Eq, Show)
-newtype ConstructorId = ConstructorId Int
+newtype ConstructorId = ConstructorId { inner :: Int }
    deriving (Eq, Ord, Show)
-newtype ExternId = ExternId Int
+newtype ExternId = ExternId { inner :: Int }
    deriving (Eq, Show)
 
 data Resolution
@@ -162,29 +177,29 @@ data Resolution
    deriving (Eq, Show)
 
 data Expr a
-   = ExpVar a ModBind Ident                     -- add, a
-   | ExpCon a ModBind Ident                     -- Nothing, Just
-   | ExpTuple a [Expr a]                        -- (pos, Event (p, pos));
-   | ExpList a [Expr a]                         -- [a, 12, b, c]
-   | ExpLit a Literal                           -- "abc", 12, ()
-   | ExpLambda a (Lambda a)                     -- .\x y -> x + y
-   | ExpApp a (Expr a) (Expr a)                 -- Just 12, func a b
-   | ExpLetIn a (LetIn a)                       -- let a = 1 and let b = 2 in ...
-   | ExpMatch a (Match a)                       -- match EXPR of
-   | ExpIfThen a (IfThenElse a)                 -- if ... then ... else ...
-   | ExpRecConstruct a (RecConstruct a)         -- Point { x = 12, y = 34 }
-   | ExpRecUpdate a (RecUpdate a)               -- value { field = 12, field2 = True }
-   | ExpVarGetter a (Expr a) Getter             -- var.x, tuple.0
+   = ExpVar { info :: a, bind :: ModBind, name :: VarName }          -- add, a
+   | ExpCon { info :: a, bind :: ModBind, ctor :: CtorName }         -- Nothing, Just
+   | ExpTuple { info :: a, elements :: [Expr a] }                    -- (pos, Event (p, pos));
+   | ExpList { info :: a, elements :: [Expr a] }                     -- [a, 12, b, c]
+   | ExpLit { info :: a, literal :: Literal }                        -- "abc", 12, ()
+   | ExpLambda { info :: a, lambda :: Lambda a }                     -- .\x y -> x + y
+   | ExpApp { info :: a, function :: Expr a, argument :: Expr a }    -- Just 12, func a b
+   | ExpLetIn { info :: a, letIn :: LetIn a }                        -- let a = 1 and let b = 2 in ...
+   | ExpMatch { info :: a, match :: Match a }                        -- match EXPR of
+   | ExpIfThen { info :: a, ifThenElse :: IfThenElse a }             -- if ... then ... else ...
+   | ExpRecConstruct { info :: a, construct :: RecConstruct a }      -- Point { x = 12, y = 34 }
+   | ExpRecUpdate { info :: a, update :: RecUpdate a }               -- value { field = 12, field2 = True }
+   | ExpVarGetter { info :: a, base :: Expr a, getter :: Getter }    -- var.x, tuple.0
    deriving (Eq, Show, Functor, Foldable, Traversable)
 
 data Getter
-   = GetField Ident
+   = GetField FieldName
    | GetTupleField Int
    deriving (Eq, Show)
 
 data RecConstruct a = RecConstruct
    { bind      :: ModBind
-   , con       :: Ident
+   , con       :: CtorName
    , assigns   :: [RecAssign a]
    }
    deriving (Eq, Show, Functor, Foldable, Traversable)
@@ -195,7 +210,10 @@ data RecUpdate a = RecUpdate
    }
    deriving (Eq, Show, Functor, Foldable, Traversable)
 
-data RecAssign a = RecAssign (Located Ident) (Expr a)
+data RecAssign a = RecAssign
+   { name  :: Located FieldName
+   , value :: Expr a
+   }
    deriving (Eq, Show, Functor, Foldable, Traversable)
 
 data BuiltinOp 
@@ -235,7 +253,10 @@ data Match a = Match
    }
    deriving (Eq, Show, Functor, Foldable, Traversable)
 
-data MatchWing a = MatchWing (Pattern a) (Expr a)
+data MatchWing a = MatchWing
+   { pat  :: Pattern a
+   , body :: Expr a
+   }
    deriving (Eq, Show, Functor, Foldable, Traversable)
 
 data IfThenElse a = IfThenElse
@@ -298,7 +319,7 @@ data Extern = ExtFunc ExternFunc | ExtType ExternType
 data ExternFunc = ExternFunc
    { location  :: Location
    , modifiers :: [Modifier]
-   , name      :: Ident
+   , name      :: FunctionName
    , args      :: [Located Type]
    , retType   :: Located Type
    }
@@ -306,8 +327,8 @@ data ExternFunc = ExternFunc
 
 data ExternType = ExternType
    { location  :: Location
-   , name      :: Ident
-   , generics  :: [Ident]
+   , name      :: TypeName
+   , generics  :: [GenericName]
    }
    deriving (Eq, Show)
 
@@ -318,7 +339,7 @@ data Func a = FnDef FuncDef | FnImpl (FuncImpl a)
 data FuncDef = FuncDef
    { location  :: Location
    , modifiers :: [Modifier]
-   , name      :: Ident
+   , name      :: FunctionName
    , args      :: [Located Type]
    , retType   :: Located Type
    }
@@ -327,19 +348,19 @@ data FuncDef = FuncDef
 -- fn IDENT arg1 arg2 ... argN = <IMPL>
 data FuncImpl a = FuncImpl
    { location :: Location
-   , name     :: Ident
+   , name     :: FunctionName
    , args     :: [Pattern a]
    , body     :: Expr a
    }
    deriving (Eq, Show, Functor, Foldable, Traversable)
 
 data Pattern a
-   = PatVar a Ident              -- a
-   | PatWildcard a               -- _
-   | PatLit a Literal            -- "abc"
-   | PatList a [Pattern a]       -- [a, 2, 3]
-   | PatTuple a [Pattern a]      -- (a, _, 12)
-   | PatCon a Ident [Pattern a]  -- Either a b
+   = PatVar { info :: a, name :: VarName }                              -- a
+   | PatWildcard a                                                      -- _
+   | PatLit { info :: a, literal :: Literal }                           -- "abc"
+   | PatList { info :: a, elements :: [Pattern a] }                     -- [a, 2, 3]
+   | PatTuple { info :: a, elements :: [Pattern a] }                    -- (a, _, 12)
+   | PatCon { info :: a, ctor :: CtorName, args :: [Pattern a] }        -- Either a b
    deriving (Eq, Show, Functor, Foldable, Traversable)
 
 patAnnotation :: Pattern a -> a
@@ -376,7 +397,7 @@ exprLoc = (.location) . exprAnnotation
 patLoc :: Pattern Parsed -> Location
 patLoc = (.location) . patAnnotation
 
-newtype Module = Module [Ident]
+newtype Module = Module { idents :: [Ident] }
    deriving (Eq, Ord)
 
 moduleToPath :: Module -> String -> String
@@ -417,7 +438,7 @@ data ImportPayload
 
 data ImportIntersection
    = InterModule (Located Module)
-   | InterSelect Module [Located Ident]
+   | InterSelect { moduleName :: Module, idents :: [Located Ident] }
    deriving (Eq, Show, Ord)
 
 intersectIdents :: [Located Ident] -> [Located Ident] -> [Located Ident]
@@ -469,14 +490,14 @@ data System a = SysDef SystemDef | SysImpl (SystemImpl a)
 data SystemDef = SystemDef
    { location  :: Location
    , modifiers :: [Modifier]
-   , name      :: Ident
+   , name      :: SystemName
    , entities  :: [QueriedEntity]
    , retType   :: Located Type
    , with      :: Maybe [WithType]
    }
    deriving (Eq, Show)
 
-newtype QueriedEntity = QueriedEntity [Located Type]
+newtype QueriedEntity = QueriedEntity { types :: [Located Type] }
    deriving (Eq, Show)
 
 data WithType
@@ -486,7 +507,7 @@ data WithType
 
 data SystemImpl a = SystemImpl
    { location  :: Location
-   , name      :: Ident
+   , name      :: SystemName
    , entities  :: [EntityPattern a]
    , with      :: Maybe [Pattern a]
    , body      :: Expr a
@@ -512,15 +533,15 @@ data BindingAccess
 data TypeDef = TypeDef
    { location  :: Location
    , modifiers :: [Modifier]
-   , name      :: Ident
-   , generics  :: [Ident]
+   , name      :: TypeName
+   , generics  :: [GenericName]
    , ctors     :: [Ctor]
    }
    deriving (Eq, Show)
 
 data Ctor = Ctor
    { location  :: Location
-   , name      :: Ident
+   , name      :: CtorName
    , payload   :: Payload
    }
    deriving (Eq, Show)
@@ -532,14 +553,14 @@ data Payload
    deriving (Eq, Show)
 
 data Field = Field      -- fieldOne : Int
-   { name   :: Ident   -- field2 : Maybe Bool
+   { name   :: FieldName   -- field2 : Maybe Bool
    , ty     :: Located Type
    }
    deriving (Eq, Show)
 
 data Type
-   = TyGnr Ident        -- a, b, c...
-   | TyCon Ident        -- Bool, Int, String
+   = TyGnr GenericName        -- a, b, c...
+   | TyCon TypeName        -- Bool, Int, String
    | TyApp Type Type    -- Maybe a, Either a Int...
    | TyTuple [Type]     -- (Bool, a, Maybe String)
    | TyFn [Type] Type   -- fn(Type1, Type2 ... TypeN) -> TypeRet
