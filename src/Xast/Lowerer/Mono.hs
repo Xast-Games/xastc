@@ -27,12 +27,6 @@ subst m = \case
    TyFn ps r  -> TyFn (map (subst m) ps) (subst m r)
    t          -> t
 
-payloadTypes :: Payload -> [Type]
-payloadTypes = \case
-   PUnit      -> []
-   PTuple ts  -> map (.node) ts
-   PRecord fs -> map (\f -> f.ty.node) fs
-
 monoType :: Type -> Lowerer Type
 monoType t = case splitApp t of
    (TyCon n, args) -> do
@@ -86,8 +80,10 @@ buildTupleDef arity inst = do
       error ("wrong number of elements for tuple type " ++ show inst.name)
 
    fieldTypes <- mapM monoType inst.args
+   let fieldNames = map tupleFieldName [0 ..]
+   let fields = zipWith (\name fieldType -> KirFieldDef { name = name, ty = fieldType }) fieldNames fieldTypes
    let mangledName = mangle inst
-   let ctor = KirCtor { name = Ident mangledName, fields = fieldTypes }
+   let ctor = KirCtor { name = Ident mangledName, fields = fields }
 
    return KirTypeDef
       { name  = KirName mangledName
@@ -113,10 +109,12 @@ buildUserTypeDef inst = do
 
    let sub = M.fromList (zip tpl.generics inst.args)
    ctors <- forM tpl.ctors $ \c -> do
-      tys <- mapM (monoType . subst sub) (payloadTypes c.payload)
+      fields <- forM (payloadFields c.payload) $ \(fieldName, fieldType) -> do
+         monoFieldType <- monoType (subst sub fieldType)
+         pure KirFieldDef { name = fieldName, ty = monoFieldType }
       pure KirCtor
          { name   = mangleCtor (foldl TyApp (TyCon inst.name) inst.args) c.name
-         , fields = tys
+         , fields = fields
          }
    
    return KirTypeDef 

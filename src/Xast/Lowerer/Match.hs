@@ -34,8 +34,9 @@ lowerMatchTo env ty dest match = do
    let rootVals = map snd lowered
 
    spans <- gets (.ctorSpans)
+   fieldNamesOfCtor <- gets (.ctorFieldNames)
    let rows =
-         [ Row (map (toPat spans) (rowPatterns tupled n pat)) [] i
+         [ Row (map (toPat spans fieldNamesOfCtor) (rowPatterns tupled n pat)) [] i
          | (i, MatchWing pat _) <- zip [0 ..] match.matches
          ]
    let occs = [Occ i [] | i <- [0 .. n - 1]]
@@ -62,8 +63,12 @@ rowPatterns tupled n = \case
    p | n == 1 -> [p]
    _ -> todo__ "pattern does not match the scrutinee columns"
 
-toPat :: M.Map ConstructorId Int -> Pattern Desugared -> Pat
-toPat spans = \case
+toPat
+   :: M.Map ConstructorId Int  -- ^ constructor id -> number of constructors of its type
+   -> M.Map Ident [Ident]      -- ^ constructor name -> its declared field names
+   -> Pattern Desugared
+   -> Pat
+toPat spans fieldNamesOfCtor = \case
    PatVar info ident ->
       case info.res of
          Just (ResLocal lid) -> PVar lid
@@ -73,17 +78,18 @@ toPat spans = \case
 
    -- literals never form a complete set, 
    -- so they get an unbounded span
-   PatLit _ lit -> PCon (Con (TagLit lit) 0 maxBound []) []
+   PatLit _ lit -> PCon (Con (TagLit lit) 0 maxBound [] []) []
 
    PatCon info ident args ->
       case info.res of
          Just (ResConstructor cid) ->
             let span' = M.findWithDefault maxBound cid spans
-                con = Con (TagCtor (mangleCtor info.ty ident)) (length args) span' (map patTy args)
-            in PCon con (map (toPat spans) args)
+                declaredFieldNames = M.findWithDefault [] ident fieldNamesOfCtor
+                con = Con (TagCtor (mangleCtor info.ty ident)) (length args) span' (map patTy args) declaredFieldNames
+            in PCon con (map (toPat spans fieldNamesOfCtor) args)
          _ -> todo__ ("unresolved constructor pattern " ++ show ident)
 
-   PatTuple _ [p] -> toPat spans p
+   PatTuple _ [p] -> toPat spans fieldNamesOfCtor p
    _ -> todo__ "only literal, variable, wildcard and constructor patterns are supported in match arms yet"
 
 data DTCtx = DTCtx
@@ -94,18 +100,31 @@ data DTCtx = DTCtx
 
 data OccState = OccState
    { vals   :: M.Map Occ KirValue
-   , fields :: M.Map Occ (Type, Ident) 
+   , fields :: M.Map Occ OccField
+   }
+
+-- | What is known about a field occurrence once its parent was matched.
+data OccField = OccField
+   { fieldType :: Type
+   , ctor      :: Ident   -- ^ constructor the field belongs to
+   , fieldName :: Ident
    }
 
 resolveOcc :: OccState -> Occ -> Lowerer ([KirInstruct], OccState, KirValue)
 resolveOcc st occ = case M.lookup occ st.vals of
    Just v -> pure ([], st, v)
    Nothing -> case (occ, M.lookup occ st.fields) of
-      (Occ root path@(_ : _), Just (fieldTy, ctor)) -> do
+      (Occ root path@(_ : _), Just occField') -> do
          (pre, st1, parentVal) <- resolveOcc st (Occ root (init path))
          out <- freshKirName
-         fieldTy' <- monoType fieldTy
-         let instr = KirField fieldTy' parentVal ctor (last path) out
+         fieldTy' <- monoType occField'.fieldType
+         let instr = KirField
+               { ty        = fieldTy'
+               , src       = parentVal
+               , ctor      = occField'.ctor
+               , fieldName = occField'.fieldName
+               , out       = out
+               }
          let v = KirVar out
          pure (pre ++ [instr], st1 { vals = M.insert occ v st1.vals }, v)
       _ -> todo__ ("occurrence has no known type: " ++ show occ)
@@ -129,9 +148,9 @@ lowerTreeInto ctx st dest = \case
 
       armBranches <- forM cases $ \(con, sub) -> do
          let childFields = M.fromList
-               [ (occField occ k, (fty, ctor))
+               [ (occField occ k, OccField { fieldType = fty, ctor = ctor, fieldName = fname })
                | TagCtor ctor <- [con.tag]
-               , (k, fty) <- zip [0 ..] con.fieldTys
+               , (k, fty, fname) <- zip3 [0 ..] con.fieldTys con.fieldNames
                ]
          let st2 = OccState { vals = st1.vals, fields = M.union childFields st1.fields }
          branch <- lowerBranch ctx st2 sub

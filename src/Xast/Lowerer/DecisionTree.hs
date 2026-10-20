@@ -1,6 +1,6 @@
 module Xast.Lowerer.DecisionTree where
 
-import Xast.AST (LocalId, Type)
+import Xast.AST (LocalId, Type, Ident)
 import Xast.Lowerer.Types (KirTag)
 import Xast.Utils.Generic ((|>), unreachableWith)
 import Data.Maybe (catMaybes, isJust, mapMaybe, fromJust)
@@ -58,6 +58,7 @@ data Con = Con
    , arity    :: Int
    , span     :: Int
    , fieldTys :: [Type]
+   , fieldNames :: [Ident]
    } deriving Show
 
 instance Eq Con where

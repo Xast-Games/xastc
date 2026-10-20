@@ -1,7 +1,9 @@
+{-# LANGUAGE LambdaCase #-}
 module Xast.Lowerer.Types where
 
 import Xast.AST
 import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.Map as M
 import Xast.Utils.Generic ((|>))
 
@@ -11,6 +13,7 @@ data LowerState = LowerState
    , typeInsts  :: M.Map TypeInst KirName
    , typeQueue  :: [TypeInst]
    , ctorSpans  :: M.Map ConstructorId Int
+   , ctorFieldNames :: M.Map Ident [Ident]  -- ^ declared field names of each constructor
    }
 
 data TypeInst = TypeInst
@@ -30,6 +33,9 @@ newLowerState spans progs = LowerState
       [ (td.name, td) | p <- progs, StmtTypeDef td <- p.stmts ] 
    , typeInsts    = M.empty
    , typeQueue    = []
+   , ctorFieldNames = M.fromList
+      [ (ctor.name, map fst (payloadFields ctor.payload))
+      | p <- progs, StmtTypeDef td <- p.stmts, ctor <- td.ctors ]
    }
 
 -- KIRA = Khast Intermediate RepresentAtion
@@ -46,6 +52,29 @@ data KirTypeDef = KirTypeDef
    }
    deriving Show
 
+data KirCtor = KirCtor 
+   { name   :: Ident
+   , fields :: [KirFieldDef]
+   }
+   deriving Show
+
+data KirFieldDef = KirFieldDef
+   { name :: Ident   -- ^ source name for records, @_0@, @_1@... for tuple-style payloads
+   , ty   :: Type
+   }
+   deriving Show
+
+-- | Name given to the n-th field of a tuple-style payload.
+tupleFieldName :: Int -> Ident
+tupleFieldName index = Ident (T.pack ('_' : show index))
+
+-- | Every field of a payload with its name, in declaration order.
+payloadFields :: Payload -> [(Ident, Type)]
+payloadFields = \case
+   PUnit         -> []
+   PTuple types  -> zip (map tupleFieldName [0 ..]) (map (.node) types)
+   PRecord fields -> [(field.name, field.ty.node) | field <- fields]
+
 isUnitStruct :: KirTypeDef -> Bool
 isUnitStruct td = case td.ctors of
    [single] -> null single.fields
@@ -60,12 +89,6 @@ isPlainStruct :: KirTypeDef -> Bool
 isPlainStruct td = case td.ctors of
    [single] -> not $ null single.fields
    _        -> False
-
-data KirCtor = KirCtor 
-   { name   :: Ident
-   , fields :: [Type]
-   }
-   deriving Show
 
 newtype KirName = KirName { text :: Text }
    deriving (Eq, Ord, Show)
@@ -122,7 +145,7 @@ data KirInstruct
       { ty     :: Type 
       , src    :: KirValue
       , ctor   :: Ident 
-      , plIdx  :: Int 
+      , fieldName :: Ident 
       , out    :: KirName
       }
    | KirMatch
