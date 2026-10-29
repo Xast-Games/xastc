@@ -244,7 +244,7 @@ table =
 
    ,  [ InfixL (binaryGuarded OpBitAnd "&") ]
    ,  [ InfixL (binary OpBitXor) ]
-   ,  [ InfixL (binaryGuarded OpBitOr ">") ]
+   ,  [ InfixL (binaryGuarded OpBitOr ">|") ]
 
    ,  [ InfixR (binary OpAnd) ]
    ,  [ InfixR (binary OpOr) ]

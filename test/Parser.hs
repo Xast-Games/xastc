@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE LambdaCase #-}
 module Parser where
 
 import Test.HUnit
@@ -17,40 +18,6 @@ import Xast.Parser.Headers (importDef, moduleDef)
 import Xast.Parser.System (system)
 import Xast.Parser.Program (program)
 import qualified Data.Text as T
-
-loc :: a -> Located a
-loc = Located (Location (initialPos "<test>") 0 0)
-
-assertParses 
-   :: (Eq a, Show a)
-   => Parser a
-   -> Text
-   -> a
-   -> Assertion
-assertParses p input expected =
-   case runParser (p <* eof) "<test>" input of
-      Left e ->
-         assertFailure $
-            "Expected success, got error:\n" <> errorBundlePretty e
-
-      Right found ->
-         unless (found == expected) $
-            assertFailure $
-               "Parsed value mismatch:\n" <>
-               "   expected: " <> show expected <> "\n" <>
-               "   found:    " <> show found
-
-assertFails :: Parser a -> Text -> Assertion
-assertFails p input =
-   case runParser (p <* eof) "<test>" input of
-      Right _ -> assertFailure "Expected failure, but parsing succeeded"
-      Left _  -> return ()
-
--- | `program` yields a `Text -> Program Parsed` waiting on the source text to
--- fill in `progSource`; feed it back the same source that's given to
--- `assertParses` so the produced `Program` can be compared directly.
-assertParsesProgram :: Text -> Program Parsed -> Assertion
-assertParsesProgram input = assertParses (fmap ($ input) program) input
 
 tests :: Test
 tests = TestList
@@ -143,39 +110,39 @@ patternTests :: Test
 patternTests = TestList
    [ TestCase $
       assertParses pattern' "_" $
-         loc (PatWildcard ParsedInfo)
+         (PatWildcard info)
 
    , TestCase $
       assertParses pattern' "x" $
-         loc (PatVar ParsedInfo (Ident "x"))
+         (PatVar info (Ident "x"))
 
    , TestCase $
       assertParses pattern' "Just x" $
-         loc ( PatCon ParsedInfo (Ident "Just")
-            [loc $ PatVar ParsedInfo (Ident "x")]
+         (PatCon info (Ident "Just")
+            [PatVar info (Ident "x")]
          )
 
    , TestCase $
       assertParses pattern' "()" $
-         loc (PatTuple ParsedInfo [])
+         (PatTuple info [])
 
    , TestCase $
       assertParses pattern' "(x)" $
-         loc (PatVar ParsedInfo (Ident "x"))
+         (PatVar info (Ident "x"))
 
    , TestCase $
       assertParses pattern' "(x, y)" $
-         loc ( PatTuple ParsedInfo
-            [ loc $ PatVar ParsedInfo (Ident "x")
-            , loc $ PatVar ParsedInfo (Ident "y")
+         (PatTuple info
+            [ PatVar info (Ident "x")
+            , PatVar info (Ident "y")
             ]
          )
 
    , TestCase $
       assertParses pattern' "[x, y]" $
-         loc ( PatList ParsedInfo
-            [ loc $ PatVar ParsedInfo (Ident "x")
-            , loc $ PatVar ParsedInfo (Ident "y")
+         (PatList info
+            [ PatVar info (Ident "x")
+            , PatVar info (Ident "y")
             ]
          )
 
@@ -188,638 +155,529 @@ exprTests = TestLabel "Expr (atoms)" $ TestList
    -- Variables / constructors
    [ TestCase $
       assertParses expr "x" $
-         loc $
-            ExpVar ParsedInfo Nothing (Ident "x")
+         ExpVar info Nothing (Ident "x")
 
    , TestCase $
       assertParses expr "Point" $
-         loc $
-            ExpCon ParsedInfo Nothing (Ident "Point")
+         ExpCon info Nothing (Ident "Point")
 
    , TestCase $
       assertParses expr "Math.value" $
-         loc $
-            ExpVar ParsedInfo (Just (Ident "Math")) (Ident "value")
+         ExpVar info (Just (Ident "Math")) (Ident "value")
 
    , TestCase $
       assertParses expr "Math.Point" $
-         loc $
-            ExpCon ParsedInfo (Just (Ident "Math")) (Ident "Point")
+         ExpCon info (Just (Ident "Math")) (Ident "Point")
 
    -- Integer / float
    , TestCase $
       assertParses expr "123" $
-         loc $
-            ExpLit ParsedInfo (LitInt 123)
+         ExpLit info (LitInt (int 123))
 
    , TestCase $
       assertParses expr "0" $
-         loc $
-            ExpLit ParsedInfo (LitInt 0)
+         ExpLit info (LitInt (int 0))
 
    , TestCase $
       assertParses expr "3.14" $
-         loc $
-            ExpLit ParsedInfo (LitFloat 3.14)
+         ExpLit info (LitDouble 3.14)
 
    -- Char / string
    , TestCase $
       assertParses expr "'a'" $
-         loc $
-            ExpLit ParsedInfo (LitChar 'a')
+         ExpLit info (LitChar 'a')
 
    , TestCase $
       assertParses expr "\"hello\"" $
-         loc $
-            ExpLit ParsedInfo (LitString "hello")
+         ExpLit info (LitString "hello")
 
    -- Lists
    , TestCase $
       assertParses expr "[]" $
-         loc $
-            ExpList ParsedInfo []
+         ExpList info []
 
    , TestCase $
       assertParses expr "[1]" $
-         loc $
-            ExpList ParsedInfo
-               [ loc $
-                  ExpLit ParsedInfo (LitInt 1)
+         ExpList info
+               [ ExpLit info (LitInt (int 1))
                ]
 
    , TestCase $
       assertParses expr "[1, 2, 3]" $
-         loc $
-            ExpList ParsedInfo
-               [ loc $ ExpLit ParsedInfo (LitInt 1)
-               , loc $ ExpLit ParsedInfo (LitInt 2)
-               , loc $ ExpLit ParsedInfo (LitInt 3)
+         ExpList info
+               [ ExpLit info (LitInt (int 1))
+               , ExpLit info (LitInt (int 2))
+               , ExpLit info (LitInt (int 3))
                ]
 
    -- Empty / singleton / tuple
    , TestCase $
       assertParses expr "()" $
-         loc $
-            ExpTuple ParsedInfo []
+         ExpTuple info []
 
    , TestCase $
       assertParses expr "(1)" $
-         loc $
-            ExpLit ParsedInfo (LitInt 1)
+         ExpLit info (LitInt (int 1))
 
    , TestCase $
       assertParses expr "(1, 2)" $
-         loc $
-            ExpTuple ParsedInfo
-               [ loc $ ExpLit ParsedInfo (LitInt 1)
-               , loc $ ExpLit ParsedInfo (LitInt 2)
+         ExpTuple info
+               [ ExpLit info (LitInt (int 1))
+               , ExpLit info (LitInt (int 2))
                ]
 
    , TestCase $
       assertParses expr "(1, 2, 3)" $
-         loc $
-            ExpTuple ParsedInfo
-               [ loc $ ExpLit ParsedInfo (LitInt 1)
-               , loc $ ExpLit ParsedInfo (LitInt 2)
-               , loc $ ExpLit ParsedInfo (LitInt 3)
+         ExpTuple info
+               [ ExpLit info (LitInt (int 1))
+               , ExpLit info (LitInt (int 2))
+               , ExpLit info (LitInt (int 3))
                ]
 
    -- Function application
    , TestCase $
       assertParses expr "f x" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $ ExpVar ParsedInfo Nothing (Ident "f"))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "x"))
+         ExpApp info
+               (ExpVar info Nothing (Ident "f"))
+               (ExpVar info Nothing (Ident "x"))
 
    , TestCase $
       assertParses expr "f x y" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "f"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "x")))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "y"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "f"))
+                     (ExpVar info Nothing (Ident "x")))
+               (ExpVar info Nothing (Ident "y"))
 
    , TestCase $
       assertParses expr "f (g x)" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $ ExpVar ParsedInfo Nothing (Ident "f"))
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "g"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "x")))
+         ExpApp info
+               (ExpVar info Nothing (Ident "f"))
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "g"))
+                     (ExpVar info Nothing (Ident "x")))
 
    , TestCase $
       assertParses expr "Just 42" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $ ExpCon ParsedInfo Nothing (Ident "Just"))
-               (loc $ ExpLit ParsedInfo (LitInt 42))
+         ExpApp info
+               (ExpCon info Nothing (Ident "Just"))
+               (ExpLit info (LitInt (int 42)))
 
    , TestCase $
       assertParses expr "Maybe.Just 42" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $ ExpCon ParsedInfo (Just $ Ident "Maybe") (Ident "Just"))
-               (loc $ ExpLit ParsedInfo (LitInt 42))
+         ExpApp info
+               (ExpCon info (Just $ Ident "Maybe") (Ident "Just"))
+               (ExpLit info (LitInt (int 42)))
 
    -- Getters
    , TestCase $
       assertParses expr "point.x" $
-         loc $
-            ExpVarGetter ParsedInfo
-               (loc $ ExpVar ParsedInfo Nothing (Ident "point"))
+         ExpVarGetter info
+               (ExpVar info Nothing (Ident "point"))
                (GetField $ Ident "x")
 
    , TestCase $
       assertParses expr "tuple.0" $
-         loc $
-            ExpVarGetter ParsedInfo
-               (loc $ ExpVar ParsedInfo Nothing (Ident "tuple"))
+         ExpVarGetter info
+               (ExpVar info Nothing (Ident "tuple"))
                (GetTupleField 0)
 
    , TestCase $
       assertParses expr "tuple.15" $
-         loc $
-            ExpVarGetter ParsedInfo
-               (loc $ ExpVar ParsedInfo Nothing (Ident "tuple"))
+         ExpVarGetter info
+               (ExpVar info Nothing (Ident "tuple"))
                (GetTupleField 15)
 
    , TestCase $
       assertParses expr "point.pos.x" $
-         loc $
-            ExpVarGetter ParsedInfo
-               (loc $
-                  ExpVarGetter ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "point"))
+         ExpVarGetter info
+               (ExpVarGetter info
+                     (ExpVar info Nothing (Ident "point"))
                      (GetField $ Ident "pos"))
                (GetField $ Ident "x")
 
    , TestCase $
       assertParses expr "matrix.0.1" $
-         loc $
-            ExpVarGetter ParsedInfo
-               (loc $
-                  ExpVarGetter ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "matrix"))
+         ExpVarGetter info
+               (ExpVarGetter info
+                     (ExpVar info Nothing (Ident "matrix"))
                      (GetTupleField 0))
                (GetTupleField 1)
 
    -- Record construction
    , TestCase $
       assertParses expr "Point { x = 1 }" $
-         loc $
-            ExpRecConstruct ParsedInfo $
+         ExpRecConstruct info $
                RecConstruct
                   Nothing
                   (Ident "Point")
                   [ RecAssign
                         (loc $ Ident "x")
-                        (loc $ ExpLit ParsedInfo $ LitInt 1)
+                        (ExpLit info $ LitInt (int 1))
                   ]
 
    , TestCase $
       assertParses expr "Point { x = 1, y = 2 }" $
-         loc $
-            ExpRecConstruct ParsedInfo $
+         ExpRecConstruct info $
                RecConstruct
                   Nothing
                   (Ident "Point")
                   [ RecAssign
                         (loc $ Ident "x")
-                        (loc $ ExpLit ParsedInfo $ LitInt 1)
+                        (ExpLit info $ LitInt (int 1))
                   , RecAssign
                         (loc $ Ident "y")
-                        (loc $ ExpLit ParsedInfo $ LitInt 2)
+                        (ExpLit info $ LitInt (int 2))
                   ]
 
    , TestCase $
       assertParses expr "Math.Point { x = 1 }" $
-         loc $
-            ExpRecConstruct ParsedInfo $
+         ExpRecConstruct info $
                RecConstruct
                   (Just $ Ident "Math")
                   (Ident "Point")
                   [ RecAssign
                         (loc $ Ident "x")
-                        (loc $ ExpLit ParsedInfo $ LitInt 1)
+                        (ExpLit info $ LitInt (int 1))
                   ]
 
    , TestCase $
       assertParses expr "Point { x = foo, y = bar }" $
-         loc $
-            ExpRecConstruct ParsedInfo $
+         ExpRecConstruct info $
                RecConstruct
                   Nothing
                   (Ident "Point")
                   [ RecAssign
                         (loc $ Ident "x")
-                        (loc $ ExpVar ParsedInfo Nothing $ Ident "foo")
+                        (ExpVar info Nothing $ Ident "foo")
                   , RecAssign
                         (loc $ Ident "y")
-                        (loc $ ExpVar ParsedInfo Nothing $ Ident "bar")
+                        (ExpVar info Nothing $ Ident "bar")
                   ]
 
    -- Unary operators
    , TestCase $
       assertParses expr "-x" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opNeg"))
-                     (loc $ ExpLit ParsedInfo $ LitInt 0))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "x"))
+         ExpApp info
+               (ExpVar info Nothing (Ident "opNeg"))
+               (ExpVar info Nothing (Ident "x"))
 
    , TestCase $
       assertParses expr "!flag" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opNot"))
-                     (loc $ ExpLit ParsedInfo $ LitInt 0))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "flag"))
+         ExpApp info
+               (ExpVar info Nothing (Ident "opNot"))
+               (ExpVar info Nothing (Ident "flag"))
 
    -- Simple binary operators
    , TestCase $
       assertParses expr "a + b" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opAdd"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "b"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opAdd"))
+                     (ExpVar info Nothing (Ident "a")))
+               (ExpVar info Nothing (Ident "b"))
 
    , TestCase $
       assertParses expr "a - b" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opSub"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "b"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opSub"))
+                     (ExpVar info Nothing (Ident "a")))
+               (ExpVar info Nothing (Ident "b"))
 
    , TestCase $
       assertParses expr "a * b" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opMul"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "b"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opMul"))
+                     (ExpVar info Nothing (Ident "a")))
+               (ExpVar info Nothing (Ident "b"))
 
    , TestCase $
       assertParses expr "a / b" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opDiv"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "b"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opDiv"))
+                     (ExpVar info Nothing (Ident "a")))
+               (ExpVar info Nothing (Ident "b"))
 
    , TestCase $
       assertParses expr "a % b" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opMod"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "b"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opMod"))
+                     (ExpVar info Nothing (Ident "a")))
+               (ExpVar info Nothing (Ident "b"))
 
    , TestCase $
       assertParses expr "a == b" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opEq"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "b"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opEq"))
+                     (ExpVar info Nothing (Ident "a")))
+               (ExpVar info Nothing (Ident "b"))
 
    , TestCase $
       assertParses expr "a != b" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opNeq"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "b"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opNeq"))
+                     (ExpVar info Nothing (Ident "a")))
+               (ExpVar info Nothing (Ident "b"))
 
    , TestCase $
       assertParses expr "a && b" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opAnd"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "b"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opAnd"))
+                     (ExpVar info Nothing (Ident "a")))
+               (ExpVar info Nothing (Ident "b"))
 
    , TestCase $
       assertParses expr "a || b" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opOr"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "b"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opOr"))
+                     (ExpVar info Nothing (Ident "a")))
+               (ExpVar info Nothing (Ident "b"))
 
    , TestCase $
       assertParses expr "a |> f" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opPipe"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "f"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opPipe"))
+                     (ExpVar info Nothing (Ident "a")))
+               (ExpVar info Nothing (Ident "f"))
 
    , TestCase $
       assertParses expr "a <> b" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opConcat"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "b"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opConcat"))
+                     (ExpVar info Nothing (Ident "a")))
+               (ExpVar info Nothing (Ident "b"))
 
    -- Precedence
    , TestCase $
       assertParses expr "a + b * c" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opAdd"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $
-                        ExpApp ParsedInfo
-                           (loc $ ExpVar ParsedInfo Nothing (Ident "opMul"))
-                           (loc $ ExpVar ParsedInfo Nothing (Ident "b")))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "c")))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opAdd"))
+                     (ExpVar info Nothing (Ident "a")))
+               (ExpApp info
+                     (ExpApp info
+                           (ExpVar info Nothing (Ident "opMul"))
+                           (ExpVar info Nothing (Ident "b")))
+                     (ExpVar info Nothing (Ident "c")))
 
    , TestCase $
       assertParses expr "(a + b) * c" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opMul"))
-                     (loc $
-                        ExpApp ParsedInfo
-                           (loc $
-                              ExpApp ParsedInfo
-                                 (loc $ ExpVar ParsedInfo Nothing (Ident "opAdd"))
-                                 (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-                           (loc $ ExpVar ParsedInfo Nothing (Ident "b"))))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "c"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opMul"))
+                     (ExpApp info
+                           (ExpApp info
+                                 (ExpVar info Nothing (Ident "opAdd"))
+                                 (ExpVar info Nothing (Ident "a")))
+                           (ExpVar info Nothing (Ident "b"))))
+               (ExpVar info Nothing (Ident "c"))
 
    , TestCase $
       assertParses expr "a == b && c" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opAnd"))
-                     (loc $
-                        ExpApp ParsedInfo
-                           (loc $
-                              ExpApp ParsedInfo
-                                 (loc $ ExpVar ParsedInfo Nothing (Ident "opEq"))
-                                 (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-                           (loc $ ExpVar ParsedInfo Nothing (Ident "b"))))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "c"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opAnd"))
+                     (ExpApp info
+                           (ExpApp info
+                                 (ExpVar info Nothing (Ident "opEq"))
+                                 (ExpVar info Nothing (Ident "a")))
+                           (ExpVar info Nothing (Ident "b"))))
+               (ExpVar info Nothing (Ident "c"))
 
    , TestCase $
       assertParses expr "a && b || c" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opOr"))
-                     (loc $
-                        ExpApp ParsedInfo
-                           (loc $
-                              ExpApp ParsedInfo
-                                 (loc $ ExpVar ParsedInfo Nothing (Ident "opAnd"))
-                                 (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-                           (loc $ ExpVar ParsedInfo Nothing (Ident "b"))))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "c"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opOr"))
+                     (ExpApp info
+                           (ExpApp info
+                                 (ExpVar info Nothing (Ident "opAnd"))
+                                 (ExpVar info Nothing (Ident "a")))
+                           (ExpVar info Nothing (Ident "b"))))
+               (ExpVar info Nothing (Ident "c"))
 
    -- Associativity
    , TestCase $
       assertParses expr "a - b - c" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opSub"))
-                     (loc $
-                        ExpApp ParsedInfo
-                           (loc $
-                              ExpApp ParsedInfo
-                                 (loc $ ExpVar ParsedInfo Nothing (Ident "opSub"))
-                                 (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-                           (loc $ ExpVar ParsedInfo Nothing (Ident "b"))))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "c"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opSub"))
+                     (ExpApp info
+                           (ExpApp info
+                                 (ExpVar info Nothing (Ident "opSub"))
+                                 (ExpVar info Nothing (Ident "a")))
+                           (ExpVar info Nothing (Ident "b"))))
+               (ExpVar info Nothing (Ident "c"))
 
    , TestCase $
       assertParses expr "a |> b |> c" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opPipe"))
-                     (loc $
-                        ExpApp ParsedInfo
-                           (loc $
-                              ExpApp ParsedInfo
-                                 (loc $ ExpVar ParsedInfo Nothing (Ident "opPipe"))
-                                 (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-                           (loc $ ExpVar ParsedInfo Nothing (Ident "b"))))
-               (loc $ ExpVar ParsedInfo Nothing (Ident "c"))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opPipe"))
+                     (ExpApp info
+                           (ExpApp info
+                                 (ExpVar info Nothing (Ident "opPipe"))
+                                 (ExpVar info Nothing (Ident "a")))
+                           (ExpVar info Nothing (Ident "b"))))
+               (ExpVar info Nothing (Ident "c"))
 
    , TestCase $
       assertParses expr "a ** b ** c" $
-         loc $
-            ExpApp ParsedInfo
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "opPow"))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "a")))
-               (loc $
-                  ExpApp ParsedInfo
-                     (loc $
-                        ExpApp ParsedInfo
-                           (loc $ ExpVar ParsedInfo Nothing (Ident "opPow"))
-                           (loc $ ExpVar ParsedInfo Nothing (Ident "b")))
-                     (loc $ ExpVar ParsedInfo Nothing (Ident "c")))
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "opPow"))
+                     (ExpVar info Nothing (Ident "a")))
+               (ExpApp info
+                     (ExpApp info
+                           (ExpVar info Nothing (Ident "opPow"))
+                           (ExpVar info Nothing (Ident "b")))
+                     (ExpVar info Nothing (Ident "c")))
 
    -- Lambda
    , TestCase $
       assertParses expr ".\\x -> x" $
-         loc $
-            ExpLambda ParsedInfo $
+         ExpLambda info $
                Lambda
-                  [loc $ PatVar ParsedInfo (Ident "x")]
-                  (loc $ ExpVar ParsedInfo Nothing (Ident "x"))
+                  [PatVar info (Ident "x")]
+                  (ExpVar info Nothing (Ident "x"))
 
    , TestCase $
       assertParses expr ".\\x y -> x" $
-         loc $
-            ExpLambda ParsedInfo $
+         ExpLambda info $
                Lambda
-                  [loc $ PatVar ParsedInfo (Ident "x"), loc $ PatVar ParsedInfo (Ident "y")]
-                  (loc $ ExpVar ParsedInfo Nothing (Ident "x"))
+                  [PatVar info (Ident "x"), PatVar info (Ident "y")]
+                  (ExpVar info Nothing (Ident "x"))
 
    , TestCase $
       assertParses expr ".\\a b c -> c" $
-         loc $
-            ExpLambda ParsedInfo $
+         ExpLambda info $
                Lambda
-                  [loc $ PatVar ParsedInfo (Ident "a"), loc $ PatVar ParsedInfo (Ident "b"), loc $ PatVar ParsedInfo (Ident "c")]
-                  (loc $ ExpVar ParsedInfo Nothing (Ident "c"))
+                  [PatVar info (Ident "a"), PatVar info (Ident "b"), PatVar info (Ident "c")]
+                  (ExpVar info Nothing (Ident "c"))
 
    , TestCase $
       assertParses expr ".\\(x, y) -> x" $
-         loc $
-            ExpLambda ParsedInfo $
+         ExpLambda info $
                Lambda
-                  [loc $ PatTuple ParsedInfo [loc $ PatVar ParsedInfo (Ident "x"), loc $ PatVar ParsedInfo (Ident "y")]]
-                  (loc $ ExpVar ParsedInfo Nothing (Ident "x"))
+                  [PatTuple info [PatVar info (Ident "x"), PatVar info (Ident "y")]]
+                  (ExpVar info Nothing (Ident "x"))
 
    , TestCase $
       assertParses expr ".\\MyStruct a b -> a" $
-         loc $
-            ExpLambda ParsedInfo $
+         ExpLambda info $
                Lambda
-                  [loc $ PatCon ParsedInfo (Ident "MyStruct") [loc $ PatVar ParsedInfo (Ident "a"), loc $ PatVar ParsedInfo (Ident "b")]]
-                  (loc $ ExpVar ParsedInfo Nothing (Ident "a"))
+                  [PatCon info (Ident "MyStruct") [PatVar info (Ident "a"), PatVar info (Ident "b")]]
+                  (ExpVar info Nothing (Ident "a"))
 
    -- If
    , TestCase $
       assertParses expr "if cond then a else b" $
-         loc $
-            ExpIfThen ParsedInfo $
+         ExpIfThen info $
                IfThenElse
-                  (loc $ ExpVar ParsedInfo Nothing (Ident "cond"))
-                  (loc $ ExpVar ParsedInfo Nothing (Ident "a"))
-                  (loc $ ExpVar ParsedInfo Nothing (Ident "b"))
+                  (ExpVar info Nothing (Ident "cond"))
+                  (ExpVar info Nothing (Ident "a"))
+                  (ExpVar info Nothing (Ident "b"))
 
    , TestCase $
       assertParses expr "if x then 1 else 2" $
-         loc $
-            ExpIfThen ParsedInfo $
+         ExpIfThen info $
                IfThenElse
-                  (loc $ ExpVar ParsedInfo Nothing (Ident "x"))
-                  (loc $ ExpLit ParsedInfo $ LitInt 1)
-                  (loc $ ExpLit ParsedInfo $ LitInt 2)
+                  (ExpVar info Nothing (Ident "x"))
+                  (ExpLit info $ LitInt (int 1))
+                  (ExpLit info $ LitInt (int 2))
 
    -- Let
    , TestCase $
       assertParses expr "let x = 1 in x" $
-         loc $
-            ExpLetIn ParsedInfo $
+         ExpLetIn info $
                LetIn
-                  [ loc $
-                        Let
-                           (loc $ PatVar ParsedInfo $ Ident "x")
-                           (loc $ ExpLit ParsedInfo $ LitInt 1)
+                  [ Let
+                           (PatVar info $ Ident "x")
+                           (ExpLit info $ LitInt (int 1))
                   ]
-                  (loc $ ExpVar ParsedInfo Nothing $ Ident "x")
+                  (ExpVar info Nothing $ Ident "x")
 
    , TestCase $
-      assertParses expr "let x = 1 and let y = 2 in x" $
-         loc $
-            ExpLetIn ParsedInfo $
+      assertParses expr "let x = 1, let y = 2 in x" $
+         ExpLetIn info $
                LetIn
-                  [ loc $
-                        Let
-                           (loc $ PatVar ParsedInfo $ Ident "x")
-                           (loc $ ExpLit ParsedInfo $ LitInt 1)
-                  , loc $
-                        Let
-                           (loc $ PatVar ParsedInfo $ Ident "y")
-                           (loc $ ExpLit ParsedInfo $ LitInt 2)
+                  [ Let
+                           (PatVar info $ Ident "x")
+                           (ExpLit info $ LitInt (int 1))
+                  , Let
+                           (PatVar info $ Ident "y")
+                           (ExpLit info $ LitInt (int 2))
                   ]
-                  (loc $ ExpVar ParsedInfo Nothing $ Ident "x")
+                  (ExpVar info Nothing $ Ident "x")
 
    , TestCase $
       assertParses expr "let (a, b) = pair in a" $
-         loc $
-            ExpLetIn ParsedInfo $
+         ExpLetIn info $
                LetIn
-                  [ loc $
-                        Let
-                           (loc $ PatTuple ParsedInfo
-                              [ loc $ PatVar ParsedInfo $ Ident "a"
-                              , loc $ PatVar ParsedInfo $ Ident "b"
+                  [ Let
+                           (PatTuple info
+                              [ PatVar info $ Ident "a"
+                              , PatVar info $ Ident "b"
                               ])
-                           (loc $ ExpVar ParsedInfo Nothing $ Ident "pair")
+                           (ExpVar info Nothing $ Ident "pair")
                   ]
-                  (loc $ ExpVar ParsedInfo Nothing $ Ident "a")
+                  (ExpVar info Nothing $ Ident "a")
 
    -- Match
    , TestCase $
       assertParses expr "match x with _ -> 0" $
-         loc $
-            ExpMatch ParsedInfo $
+         ExpMatch info $
                Match
-                  (loc $ ExpVar ParsedInfo Nothing $ Ident "x")
+                  (ExpVar info Nothing $ Ident "x")
                   [ MatchWing
-                        (loc $ PatWildcard ParsedInfo)
-                        (loc $ ExpLit ParsedInfo $ LitInt 0)
+                        (PatWildcard info)
+                        (ExpLit info $ LitInt (int 0))
                   ]
+                  False
 
    , TestCase $
       assertParses expr "match x with Just y -> y, Nothing -> 0" $
-         loc $
-            ExpMatch ParsedInfo $
+         ExpMatch info $
                Match
-                  (loc $ ExpVar ParsedInfo Nothing $ Ident "x")
+                  (ExpVar info Nothing $ Ident "x")
                   [ MatchWing
-                        (loc $
-                           PatCon ParsedInfo
+                        (PatCon info
                               (Ident "Just")
-                              [loc $ PatVar ParsedInfo $ Ident "y"])
-                        (loc $ ExpVar ParsedInfo Nothing $ Ident "y")
+                              [PatVar info $ Ident "y"])
+                        (ExpVar info Nothing $ Ident "y")
 
                   , MatchWing
-                        (loc $
-                           PatCon ParsedInfo
+                        (PatCon info
                               (Ident "Nothing")
                               [])
-                        (loc $ ExpLit ParsedInfo $ LitInt 0)
+                        (ExpLit info $ LitInt (int 0))
                   ]
+                  False
 
    , TestCase $
       assertParses expr "match xs with [] -> 0, _ -> 1" $
-         loc $
-            ExpMatch ParsedInfo $
+         ExpMatch info $
                Match
-                  (loc $ ExpVar ParsedInfo Nothing $ Ident "xs")
+                  (ExpVar info Nothing $ Ident "xs")
                   [ MatchWing
-                     (loc $ PatList ParsedInfo [])
-                     (loc $ ExpLit ParsedInfo $ LitInt 0)
+                     (PatList info [])
+                     (ExpLit info $ LitInt (int 0))
 
                   , MatchWing
-                     (loc $ PatWildcard ParsedInfo)
-                     (loc $ ExpLit ParsedInfo $ LitInt 1)
+                     (PatWildcard info)
+                     (ExpLit info $ LitInt (int 1))
                   ]
+                  False
 
    -- Failure cases
    , TestCase $
@@ -978,85 +836,85 @@ functionTests :: Test
 functionTests = TestLabel "Functions" $ TestList
    -- Function declarations
    [ TestCase $
-      assertParses func
+      assertParsesIgnoringLocations withTestLocationFunc func
          "fn add(Int, Int) -> Int;"
          (FnDef $
-            loc $
-               FuncDef
+            FuncDef
+                  testLocation
                   []
                   (Ident "add")
-                  [ TyCon $ Ident "Int"
-                  , TyCon $ Ident "Int"
+                  [ (loc $ TyCon $ Ident "Int")
+                  , (loc $ TyCon $ Ident "Int")
                   ]
-                  (TyCon $ Ident "Int"))
+                  (loc $ TyCon $ Ident "Int"))
 
    , TestCase $
-      assertParses func
+      assertParsesIgnoringLocations withTestLocationFunc func
          "fn id(a) -> a;"
          (FnDef $
-            loc $
-               FuncDef
+            FuncDef
+                  testLocation
                   []
                   (Ident "id")
-                  [TyGnr $ Ident "a"]
-                  (TyGnr $ Ident "a"))
+                  [(loc $ TyGnr $ Ident "a")]
+                  (loc $ TyGnr $ Ident "a"))
 
    , TestCase $
-      assertParses func
+      assertParsesIgnoringLocations withTestLocationFunc func
          "fn makePoint() -> Point;"
          (FnDef $
-            loc $
-               FuncDef
+            FuncDef
+                  testLocation
                   []
                   (Ident "makePoint")
                   []
-                  (TyCon $ Ident "Point"))
+                  (loc $ TyCon $ Ident "Point"))
 
    -- Function implementations
    , TestCase $
-      assertParses func
+      assertParsesIgnoringLocations withTestLocationFunc func
          "fn id x = x;"
          (FnImpl $
-            loc $
-               FuncImpl
+            FuncImpl
+                  testLocation
                   (Ident "id")
-                  [loc $ PatVar ParsedInfo $ Ident "x"]
-                  (loc $ ExpVar ParsedInfo Nothing $ Ident "x"))
+                  [PatVar info $ Ident "x"]
+                  (ExpVar info Nothing $ Ident "x"))
 
    , TestCase $
-      assertParses func
+      assertParsesIgnoringLocations withTestLocationFunc func
          "fn const a b = a;"
          (FnImpl $
-            loc $
-               FuncImpl
+            FuncImpl
+                  testLocation
                   (Ident "const")
-                  [ loc $ PatVar ParsedInfo $ Ident "a"
-                  , loc $ PatVar ParsedInfo $ Ident "b"
+                  [ PatVar info $ Ident "a"
+                  , PatVar info $ Ident "b"
                   ]
-                  (loc $ ExpVar ParsedInfo Nothing $ Ident "a"))
+                  (ExpVar info Nothing $ Ident "a"))
 
    , TestCase $
-      assertParses func
+      assertParsesIgnoringLocations withTestLocationFunc func
          "fn fst (a, b) = a;"
          (FnImpl $
-            loc $
-               FuncImpl
+            FuncImpl
+                  testLocation
                   (Ident "fst")
-                  [loc $ PatTuple ParsedInfo
-                     [ loc $ PatVar ParsedInfo $ Ident "a"
-                     , loc $ PatVar ParsedInfo $ Ident "b"
+                  [PatTuple info
+                     [ PatVar info $ Ident "a"
+                     , PatVar info $ Ident "b"
                      ]]
-                  (loc $ ExpVar ParsedInfo Nothing $ Ident "a"))
+                  (ExpVar info Nothing $ Ident "a"))
 
    , TestCase $
-      assertParses func
+      assertParsesIgnoringLocations withTestLocationFunc func
          "fn isEmpty [] = True;"
          (FnImpl $
-            loc $
-               FuncImpl
+            FuncImpl
+                  testLocation
                   (Ident "isEmpty")
-                  [loc $ PatList ParsedInfo []]
-                  (loc $ ExpCon ParsedInfo Nothing $ Ident "True"))
+                  [PatList info []]
+                  (ExpCon info Nothing $ Ident "True"))
 
    -- Failures
    , TestCase $
@@ -1088,97 +946,97 @@ typeDefTests :: Test
 typeDefTests = TestLabel "Type definitions" $ TestList
    -- Unit constructor
    [ TestCase $
-      assertParses typeDef
+      assertParsesIgnoringLocations withTestLocationTypeDef typeDef
          "type Bool = True | False;"
-         (loc $
-            TypeDef
+         (TypeDef
+               testLocation
                []
                (Ident "Bool")
                []
-               [ loc $ Ctor (Ident "True") PUnit
-               , loc $ Ctor (Ident "False") PUnit
+               [ Ctor testLocation (Ident "True") PUnit
+               , Ctor testLocation (Ident "False") PUnit
                ])
 
    -- Tuple constructor
    , TestCase $
-      assertParses typeDef
+      assertParsesIgnoringLocations withTestLocationTypeDef typeDef
          "type Maybe a = Just a | Nothing;"
-         (loc $
-            TypeDef
+         (TypeDef
+               testLocation
                []
                (Ident "Maybe")
                [Ident "a"]
-               [ loc $
-                     Ctor
+               [ Ctor
+                        testLocation
                         (Ident "Just")
                         (PTuple
-                           [TyGnr $ Ident "a"])
-               , loc $
-                     Ctor
+                           [(loc $ TyGnr $ Ident "a")])
+               , Ctor
+                        testLocation
                         (Ident "Nothing")
                         PUnit
                ])
 
    , TestCase $
-      assertParses typeDef
+      assertParsesIgnoringLocations withTestLocationTypeDef typeDef
          "type Either a b = Left a | Right b;"
-         (loc $
-            TypeDef
+         (TypeDef
+               testLocation
                []
                (Ident "Either")
                [Ident "a", Ident "b"]
-               [ loc $
-                     Ctor
+               [ Ctor
+                        testLocation
                         (Ident "Left")
-                        (PTuple [TyGnr $ Ident "a"])
-               , loc $
-                     Ctor
+                        (PTuple [(loc $ TyGnr $ Ident "a")])
+               , Ctor
+                        testLocation
                         (Ident "Right")
-                        (PTuple [TyGnr $ Ident "b"])
+                        (PTuple [(loc $ TyGnr $ Ident "b")])
                ])
 
    -- Record constructor
    , TestCase $
-      assertParses typeDef
+      assertParsesIgnoringLocations withTestLocationTypeDef typeDef
          "type Point = Point { x : Int, y : Int };"
-         (loc $
-            TypeDef
+         (TypeDef
+               testLocation
                []
                (Ident "Point")
                []
-               [ loc $
-                     Ctor
+               [ Ctor
+                        testLocation
                         (Ident "Point")
                         (PRecord
                            [ Field
                               (Ident "x")
-                              (TyCon $ Ident "Int")
+                              (loc $ TyCon $ Ident "Int")
                            , Field
                               (Ident "y")
-                              (TyCon $ Ident "Int")
+                              (loc $ TyCon $ Ident "Int")
                            ])
                ])
 
    -- Multiple constructors
    , TestCase $
-      assertParses typeDef
+      assertParsesIgnoringLocations withTestLocationTypeDef typeDef
          "type Shape = Circle Float | Rectangle Float Float;"
-         (loc $
-            TypeDef
+         (TypeDef
+               testLocation
                []
                (Ident "Shape")
                []
-               [ loc $
-                     Ctor
+               [ Ctor
+                        testLocation
                         (Ident "Circle")
                         (PTuple
-                           [TyCon $ Ident "Float"])
-               , loc $
-                     Ctor
+                           [(loc $ TyCon $ Ident "Float")])
+               , Ctor
+                        testLocation
                         (Ident "Rectangle")
                         (PTuple
-                           [ TyCon $ Ident "Float"
-                           , TyCon $ Ident "Float"
+                           [ (loc $ TyCon $ Ident "Float")
+                           , (loc $ TyCon $ Ident "Float")
                            ])
                ])
 
@@ -1212,60 +1070,63 @@ externTests :: Test
 externTests = TestLabel "Extern" $ TestList
    -- Extern functions
    [ TestCase $
-      assertParses extern
+      assertParsesIgnoringLocations withTestLocationExtern extern
          "extern fn puts(String) -> Int;"
          (ExtFunc $
-            loc $
-               ExternFunc
+            ExternFunc
+                  testLocation
+                  []
                   (Ident "puts")
-                  [TyCon $ Ident "String"]
-                  (TyCon $ Ident "Int"))
+                  [(loc $ TyCon $ Ident "String")]
+                  (loc $ TyCon $ Ident "Int"))
 
    , TestCase $
-      assertParses extern
+      assertParsesIgnoringLocations withTestLocationExtern extern
          "extern fn malloc(Int) -> Ptr;"
          (ExtFunc $
-            loc $
-               ExternFunc
+            ExternFunc
+                  testLocation
+                  []
                   (Ident "malloc")
-                  [TyCon $ Ident "Int"]
-                  (TyCon $ Ident "Ptr"))
+                  [(loc $ TyCon $ Ident "Int")]
+                  (loc $ TyCon $ Ident "Ptr"))
 
    , TestCase $
-        assertParses extern
+        assertParsesIgnoringLocations withTestLocationExtern extern
            "extern fn panic() -> Never;"
            (ExtFunc $
-              loc $
-                 ExternFunc
+              ExternFunc
+                    testLocation
+                    []
                     (Ident "panic")
                     []
-                  (TyCon $ Ident "Never"))
+                  (loc $ TyCon $ Ident "Never"))
 
    -- Extern types
    , TestCase $
-      assertParses extern
+      assertParsesIgnoringLocations withTestLocationExtern extern
          "extern type CString;"
          (ExtType $
-            loc $
-               ExternType
+            ExternType
+                  testLocation
                   (Ident "CString")
                   [])
 
    , TestCase $
-      assertParses extern
+      assertParsesIgnoringLocations withTestLocationExtern extern
          "extern type Ptr a;"
          (ExtType $
-            loc $
-               ExternType
+            ExternType
+                  testLocation
                   (Ident "Ptr")
                   [Ident "a"])
 
    , TestCase $
-      assertParses extern
+      assertParsesIgnoringLocations withTestLocationExtern extern
          "extern type Either a b;"
          (ExtType $
-            loc $
-               ExternType
+            ExternType
+                  testLocation
                   (Ident "Either")
                   [Ident "a", Ident "b"])
 
@@ -1284,18 +1145,18 @@ headerTests :: Test
 headerTests = TestLabel "Headers" $ TestList
    -- Modules
    [ TestCase $
-      assertParses moduleDef
+      assertParsesIgnoringLocations withTestLocationModuleDef moduleDef
          "module Main exports *"
-         (loc $
-            ModuleDef
+         (ModuleDef
+               testLocation
                (Module [Ident "Main"])
                (loc ExpFull))
 
    , TestCase $
-      assertParses moduleDef
+      assertParsesIgnoringLocations withTestLocationModuleDef moduleDef
          "module Foo.Bar exports *"
-         (loc $
-            ModuleDef
+         (ModuleDef
+               testLocation
                (Module
                   [ Ident "Foo"
                   , Ident "Bar"
@@ -1303,16 +1164,15 @@ headerTests = TestLabel "Headers" $ TestList
                (loc ExpFull))
 
    , TestCase $
-      assertParses moduleDef
+      assertParsesIgnoringLocations withTestLocationModuleDef moduleDef
          "module Game.Player exports { Player, spawn }"
-         (loc $
-            ModuleDef
+         (ModuleDef
+               testLocation
                (Module
                   [ Ident "Game"
                   , Ident "Player"
                   ])
-               (loc $
-                  ExpSelect
+               (loc $ ExpSelect
                      [ Ident "Player"
                      , Ident "spawn"
                      ]))
@@ -1377,120 +1237,120 @@ systemTests :: Test
 systemTests = TestLabel "Systems" $ TestList
    -- Definitions
    [ TestCase $
-      assertParses system
+      assertParsesIgnoringLocations withTestLocationSystem system
          "system Move -> ();"
          (SysDef $
-            loc $
-               SystemDef
+            SystemDef
+                  testLocation
                   []
                   (Ident "Move")
                   []
-                  (TyTuple [])
+                  (loc $ TyTuple [])
                   Nothing)
 
    , TestCase $
-      assertParses system
+      assertParsesIgnoringLocations withTestLocationSystem system
          "system Move #(Position) -> ();"
          (SysDef $
-            loc $
-               SystemDef
+            SystemDef
+                  testLocation
                   []
                   (Ident "Move")
                   [QueriedEntity
-                     [TyCon $ Ident "Position"]]
-                  (TyTuple [])
+                     [(loc $ TyCon $ Ident "Position")]]
+                  (loc $ TyTuple [])
                   Nothing)
 
    , TestCase $
-      assertParses system
+      assertParsesIgnoringLocations withTestLocationSystem system
          "system Move #(Position, Velocity) -> ();"
          (SysDef $
-            loc $
-               SystemDef
+            SystemDef
+                  testLocation
                   []
                   (Ident "Move")
                   [QueriedEntity
-                     [ TyCon $ Ident "Position"
-                     , TyCon $ Ident "Velocity"
+                     [ (loc $ TyCon $ Ident "Position")
+                     , (loc $ TyCon $ Ident "Velocity")
                      ]]
-                  (TyTuple [])
+                  (loc $ TyTuple [])
                   Nothing)
 
    , TestCase $
-      assertParses system
+      assertParsesIgnoringLocations withTestLocationSystem system
          "system Move -> () with event: Damage;"
          (SysDef $
-            loc $
-               SystemDef
+            SystemDef
+                  testLocation
                   []
                   (Ident "Move")
                   []
-                  (TyTuple [])
+                  (loc $ TyTuple [])
                   (Just
-                     [WithEvent $ TyCon $ Ident "Damage"]))
+                     [WithEvent $ (loc $ TyCon $ Ident "Damage")]))
 
    , TestCase $
-      assertParses system
+      assertParsesIgnoringLocations withTestLocationSystem system
          "system Move -> () with res: Time;"
          (SysDef $
-            loc $
-               SystemDef
+            SystemDef
+                  testLocation
                   []
                   (Ident "Move")
                   []
-                  (TyTuple [])
+                  (loc $ TyTuple [])
                   (Just
-                     [WithRes $ TyCon $ Ident "Time"]))
+                     [WithRes $ (loc $ TyCon $ Ident "Time")]))
 
    , TestCase $
-      assertParses system
-         "@label = \"physics\" system Move -> ();"
+      assertParsesIgnoringLocations withTestLocationSystem system
+         "@Label(Physics) system Move -> ();"
          (SysDef $
-            loc $
-               SystemDef
-                  []
+            SystemDef
+                  testLocation
+                  [SysMod $ ModLabel $ Ident "Physics"]
                   (Ident "Move")
                   []
-                  (TyTuple [])
+                  (loc $ TyTuple [])
                   Nothing)
 
    -- Implementations
    , TestCase $
-      assertParses system
+      assertParsesIgnoringLocations withTestLocationSystem system
          "system Move = pos;"
          (SysImpl $
-            loc $
-               SystemImpl
+            SystemImpl
+                  testLocation
                   (Ident "Move")
                   []
                   Nothing
-                  (loc $ ExpVar ParsedInfo Nothing $ Ident "pos"))
+                  (ExpVar info Nothing $ Ident "pos"))
 
    , TestCase $
-      assertParses system
-         "system Move #(pos vel) = pos;"
+      assertParsesIgnoringLocations withTestLocationSystem system
+         "system Move pos vel = pos;"
          (SysImpl $
-            loc $
-               SystemImpl
+            SystemImpl
+                  testLocation
                   (Ident "Move")
                   [EntityPattern
-                     [ EntPatBinding (loc $ PatVar ParsedInfo $ Ident "pos") AccessRead
-                     , EntPatBinding (loc $ PatVar ParsedInfo $ Ident "vel") AccessRead
+                     [ EntPatBinding (PatVar info $ Ident "pos") AccessRead
+                     , EntPatBinding (PatVar info $ Ident "vel") AccessRead
                      ]]
                   Nothing
-                  (loc $ ExpVar ParsedInfo Nothing $ Ident "pos"))
+                  (ExpVar info Nothing $ Ident "pos"))
 
    , TestCase $
-      assertParses system
+      assertParsesIgnoringLocations withTestLocationSystem system
          "system Move with dt = dt;"
          (SysImpl $
-            loc $
-               SystemImpl
+            SystemImpl
+                  testLocation
                   (Ident "Move")
                   []
                   (Just
-                     [loc $ PatVar ParsedInfo $ Ident "dt"])
-                  (loc $ ExpVar ParsedInfo Nothing $ Ident "dt"))
+                     [PatVar info $ Ident "dt"])
+                  (ExpVar info Nothing $ Ident "dt"))
 
    -- Failures
    , TestCase $ assertFails system "system"
@@ -1510,39 +1370,38 @@ programTests = TestLabel "Programs" $ TestList
             ]
       in assertParsesProgram src
          (Program
-            (loc $
-               ModuleDef
+            (ModuleDef
+                  testLocation
                   (Module [Ident "Main"])
                   (loc ExpFull))
             []
             [ StmtFunc $
                   FnDef $
-                     loc $
-                        FuncDef
+                     FuncDef
+                           testLocation
                            []
                            (Ident "main")
                            []
-                           (TyCon $ Ident "Int")
+                           (loc $ TyCon $ Ident "Int")
             ]
             src)
 
    , TestCase $
       let src = T.unlines
-            [ "@mode = \"safe\""
-            , "module Main exports *"
+            [ "module Main exports *"
             , "extern type CString;"
             ]
       in assertParsesProgram src
          (Program
-            (loc $
-               ModuleDef
+            (ModuleDef
+                  testLocation
                   (Module [Ident "Main"])
                   (loc ExpFull))
             []
             [ StmtExtern $
                   ExtType $
-                     loc $
-                        ExternType
+                     ExternType
+                           testLocation
                            (Ident "CString")
                            []
             ]
@@ -1550,15 +1409,14 @@ programTests = TestLabel "Programs" $ TestList
 
    , TestCase $
       let src = T.unlines
-            [ "@mode = \"dynamic\""
-            , "module Game.Main exports *"
+            [ "module Game.Main exports *"
             , "use Math *"
             , "type Bool = True | False;"
             ]
       in assertParsesProgram src
          (Program
-            (loc $
-               ModuleDef
+            (ModuleDef
+                  testLocation
                   (Module
                      [Ident "Game", Ident "Main"])
                   (loc ExpFull))
@@ -1567,13 +1425,13 @@ programTests = TestLabel "Programs" $ TestList
                   (Module [Ident "Math"])
                   ImpFull]
             [ StmtTypeDef $
-                  loc $
-                     TypeDef
+                  TypeDef
+                        testLocation
                         []
                         (Ident "Bool")
                         []
-                        [ loc $ Ctor (Ident "True") PUnit
-                        , loc $ Ctor (Ident "False") PUnit
+                        [ Ctor testLocation (Ident "True") PUnit
+                        , Ctor testLocation (Ident "False") PUnit
                         ]
             ]
             src)
@@ -1612,3 +1470,105 @@ programTests = TestLabel "Programs" $ TestList
             , "unknown"
             ]
    ]
+
+testLocation :: Location
+testLocation = Location (initialPos "<test>") 0 0
+
+loc :: a -> Located a
+loc = Located testLocation
+
+-- | The info of a parsed node. Parsed values compare equal whatever their location.
+info :: Parsed
+info = ParsedInfo testLocation
+
+-- | An unsuffixed integer literal.
+int :: Integer -> IntLiteral
+int = IntLiteral Int
+
+assertParses 
+   :: (Eq a, Show a)
+   => Parser a
+   -> Text
+   -> a
+   -> Assertion
+assertParses p input expected =
+   case runParser (p <* eof) "<test>" input of
+      Left e ->
+         assertFailure $
+            "Expected success, got error:\n" <> errorBundlePretty e
+
+      Right found ->
+         unless (found == expected) $
+            assertFailure $
+               "Parsed value mismatch:\n" <>
+               "   expected: " <> show expected <> "\n" <>
+               "   found:    " <> show found
+
+-- | Like `assertParses`, but first overwrites the `Location` fields that the
+-- parser records (and that derived `Eq` compares) with `testLocation`.
+assertParsesIgnoringLocations
+   :: (Eq a, Show a)
+   => (a -> a)
+   -> Parser a
+   -> Text
+   -> a
+   -> Assertion
+assertParsesIgnoringLocations setLocations p = assertParses (setLocations <$> p)
+
+-- The `withTestLocation...` functions below return their argument with every
+-- `Location` the parser recorded replaced by `testLocation`, so that expected
+-- values do not need to know exact source positions.
+withTestLocationFunc :: Func Parsed -> Func Parsed
+withTestLocationFunc = \case
+   FnDef (FuncDef _ modifiers name args retType) ->
+      FnDef (FuncDef testLocation modifiers name args retType)
+   FnImpl (FuncImpl _ name args body) ->
+      FnImpl (FuncImpl testLocation name args body)
+
+withTestLocationTypeDef :: TypeDef -> TypeDef
+withTestLocationTypeDef (TypeDef _ modifiers name generics ctors) =
+   TypeDef testLocation modifiers name generics (map withTestLocationCtor ctors)
+
+withTestLocationCtor :: Ctor -> Ctor
+withTestLocationCtor (Ctor _ name payload) = Ctor testLocation name payload
+
+withTestLocationExtern :: Extern -> Extern
+withTestLocationExtern = \case
+   ExtFunc (ExternFunc _ modifiers name args retType) ->
+      ExtFunc (ExternFunc testLocation modifiers name args retType)
+   ExtType (ExternType _ name generics) ->
+      ExtType (ExternType testLocation name generics)
+
+withTestLocationModuleDef :: ModuleDef -> ModuleDef
+withTestLocationModuleDef (ModuleDef _ name export) = ModuleDef testLocation name export
+
+withTestLocationSystem :: System Parsed -> System Parsed
+withTestLocationSystem = \case
+   SysDef (SystemDef _ modifiers name entities retType with) ->
+      SysDef (SystemDef testLocation modifiers name entities retType with)
+   SysImpl (SystemImpl _ name entities with body) ->
+      SysImpl (SystemImpl testLocation name entities with body)
+
+withTestLocationStmt :: Stmt Parsed -> Stmt Parsed
+withTestLocationStmt = \case
+   StmtTypeDef typeDef' -> StmtTypeDef (withTestLocationTypeDef typeDef')
+   StmtFunc func'       -> StmtFunc (withTestLocationFunc func')
+   StmtExtern extern'   -> StmtExtern (withTestLocationExtern extern')
+   StmtSystem system'   -> StmtSystem (withTestLocationSystem system')
+
+withTestLocationProgram :: Program Parsed -> Program Parsed
+withTestLocationProgram (Program moduleDef' imports stmts src) =
+   Program (withTestLocationModuleDef moduleDef') imports (map withTestLocationStmt stmts) src
+
+assertFails :: Parser a -> Text -> Assertion
+assertFails p input =
+   case runParser (p <* eof) "<test>" input of
+      Right _ -> assertFailure "Expected failure, but parsing succeeded"
+      Left _  -> return ()
+
+-- | `program` yields a `Text -> Program Parsed` waiting on the source text to
+-- fill in `progSource`; feed it back the same source that's given to
+-- `assertParses` so the produced `Program` can be compared directly.
+assertParsesProgram :: Text -> Program Parsed -> Assertion
+assertParsesProgram input =
+   assertParses (fmap (withTestLocationProgram . ($ input)) program) input

@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Main (main) where
+module EraseZero (tests) where
 
 import qualified Data.Set as S
 import Data.Text (Text)
@@ -8,23 +8,16 @@ import Xast.AST
 import Xast.Lowerer.Types
 import Xast.Lowerer.EraseZero
 
-main :: IO ()
-main = do
-   counts <- runTestTT tests
-   if errors counts + failures counts == 0
-      then pure ()
-      else fail "Erasure tests failed"
-
 tests :: Test
 tests = TestList
-   [ TestLabel "zero-sized types"      zeroSizedTypesTest
-   , TestLabel "type definitions"      typeDefinitionsTest
-   , TestLabel "function header"       functionHeaderTest
-   , TestLabel "calls"                 callsTest
-   , TestLabel "stores and locals"     storesAndLocalsTest
-   , TestLabel "match, erased result"  matchErasedResultTest
-   , TestLabel "match, erased scrutinee" matchErasedScrutineeTest
-   , TestLabel "system bindings"       systemBindingsTest
+   [ TestLabel "zero-sized types"         zeroSizedTypesTest
+   , TestLabel "type definitions"         typeDefinitionsTest
+   , TestLabel "function header"          functionHeaderTest
+   , TestLabel "calls"                    callsTest
+   , TestLabel "stores and locals"        storesAndLocalsTest
+   , TestLabel "match, erased result"     matchErasedResultTest
+   , TestLabel "match, erased scrutinee"  matchErasedScrutineeTest
+   , TestLabel "system bindings"          systemBindingsTest
    ]
 
 -- Fixtures ------------------------------------------------------------------

@@ -3,6 +3,7 @@ module Main (main) where
 import Test.HUnit (runTestTT, Test (TestList, TestLabel), Counts (errors, failures))
 import qualified Parser
 import qualified SemAnalyzer
+import qualified EraseZero
 
 main :: IO ()
 main = do
@@ -13,6 +14,7 @@ main = do
 
 tests :: Test
 tests = TestList 
-   [ TestLabel "Parser" Parser.tests
-   -- , TestLabel "SemAnalyzer" SemAnalyzer.tests
+   [ TestLabel "Parser"       Parser.tests
+   , TestLabel "SemAnalyzer"  SemAnalyzer.tests
+   , TestLabel "EraseZero"    EraseZero.tests
    ]
