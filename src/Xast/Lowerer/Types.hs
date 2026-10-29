@@ -142,7 +142,7 @@ data KirInstruct
       { ty     :: Type
       , callee :: KirName
       , args   :: [KirValue]
-      , out    :: KirName
+      , out    :: Maybe KirName
       }
    | KirAssign
       { binding :: KirBindingId
@@ -158,7 +158,7 @@ data KirInstruct
       , src    :: KirValue
       , ctor   :: CtorName
       , fieldName :: FieldName
-      , out    :: KirName
+      , dst    :: KirName
       }
    | KirMatch
       { ty         :: Type
@@ -179,13 +179,14 @@ data KirValue
    | KirVar KirName
    | KirBindingRef KirBindingId
    | KirLocalRef KirLocalId
+   | KirUnit  -- ^ the value of something erased (zero-sized); never reaches codegen
    deriving Show
 
 newtype KirLocalId = KirLocalId { inner :: Int }
-   deriving Show
+   deriving (Eq, Ord, Show)
 
 newtype KirBindingId = KirBindingId { inner :: Int }
-   deriving Show
+   deriving (Eq, Ord, Show)
 
 data KirDest
    = DestBinding KirBindingId -- *_bN

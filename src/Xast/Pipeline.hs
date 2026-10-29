@@ -22,6 +22,7 @@ import Xast.Utils.Pretty
 import qualified Toml
 import Control.Monad.RWS (MonadTrans(lift))
 import Xast.Lowerer.Pass (lowerPrograms)
+import Xast.Lowerer.EraseZero (eraseZeroSized)
 import Xast.Codegen.C.Pretty (debugPrograms, prettyProgram)
 import Xast.Codegen.C.Pass (codegen)
 import Xast.Utils.Compiler (Target(Target64))
@@ -92,8 +93,11 @@ runCompile_ dir = runExceptT $ do
    -- Lowering AST into KIRA
    let (loweredIR, typeDefs) = lowerPrograms ctorSpans progsAnalyzed
 
+   -- Erasing zero-sized types: they have no representation in C
+   let (erasedIR, erasedTypeDefs) = eraseZeroSized loweredIR typeDefs
+
    -- Generating C
-   let generatedC = codegen loweredIR typeDefs
+   let generatedC = codegen erasedIR erasedTypeDefs
 
    -- Temporarily print C programs as debug
    ----------------------------------------

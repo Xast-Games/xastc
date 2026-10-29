@@ -81,7 +81,10 @@ instance Eq Con where
 data Pat
    = PWildCard
    | PVar LocalId
-   | PCon { con :: Con, subpatterns :: [Pat] }
+   | PCon 
+      { con :: Con
+      , subpatterns :: [Pat] 
+      }
    deriving (Eq, Show)
 
 patCon :: Pat -> Maybe Con

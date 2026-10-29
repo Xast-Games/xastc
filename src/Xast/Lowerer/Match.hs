@@ -115,16 +115,16 @@ resolveOcc state occ = case M.lookup occ state.vals of
    Nothing -> case (occ, M.lookup occ state.fields) of
       (Occ root path@(_ : _), Just occField') -> do
          (prefix, parentState, parentVal) <- resolveOcc state (Occ root (init path))
-         out <- freshKirName
+         dst <- freshKirName
          monoFieldType <- monoType occField'.fieldType
          let instr = KirField
                { ty        = monoFieldType
                , src       = parentVal
                , ctor      = occField'.ctor
                , fieldName = occField'.fieldName
-               , out       = out
+               , dst       = dst
                }
-         let fieldValue = KirVar out
+         let fieldValue = KirVar dst
          pure (prefix ++ [instr], parentState { vals = M.insert occ fieldValue parentState.vals }, fieldValue)
       _ -> todo__ ("occurrence has no known type: " ++ show occ)
 

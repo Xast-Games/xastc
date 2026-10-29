@@ -38,7 +38,7 @@ lowerExpr env expr = case expr of
       lowered <- mapM (lowerExpr env) args
       resultName <- freshKirName
       retType' <- monoType retType
-      let instrs = concatMap fst lowered ++ [KirCall retType' (KirName functionIdent.inner) (map snd lowered) resultName]
+      let instrs = concatMap fst lowered ++ [KirCall retType' (KirName functionIdent.inner) (map snd lowered) (Just resultName)]
       pure (instrs, KirVar resultName)
 
    ExpLetIn _ letIn -> do

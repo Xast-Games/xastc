@@ -1,5 +1,4 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.Unify where
 
@@ -83,7 +82,12 @@ freshExternId = do
 
 -- | Assigns a fresh LocalId to every name, e.g. for a pattern's bound vars.
 freshLocalScope :: [(Ident, Location)] -> SemAnalyzer (M.Map Ident (LocalId, Location))
-freshLocalScope bindings = M.fromList <$> mapM (\(name, location) -> (\localId -> (name, (localId, location))) <$> freshLocalId) bindings
+freshLocalScope bindings = do
+   scopeEntries <- forM bindings $ \(name, location) -> do
+      localId <- freshLocalId
+      pure (name, (localId, location))
+
+   return $ M.fromList scopeEntries
 
 resolve :: Type -> SemAnalyzer Type
 resolve t = do

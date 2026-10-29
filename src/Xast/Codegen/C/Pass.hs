@@ -8,7 +8,7 @@ import Xast.Lowerer.Types
 import Xast.Codegen.C.Monad (CCodegen, runCodegen)
 import Control.Monad (forM)
 import Control.Monad.Identity (Identity(runIdentity))
-import Xast.Utils.Generic (todo__)
+import Xast.Utils.Generic (todo__, unreachableWith, (|>))
 import Xast.AST (moduleToPath, IntLiteral(..), Literal(..), Type(..), Ident(..), typename)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -63,25 +63,35 @@ codegenSystem system = do
          , name = "it"
          }]
 
-   let bindingDecls = zipWith declareBinding [0..] system.bindings
+   let bindingDecls = concat (zipWith declareBinding [0..] system.bindings)
    blockStmts <- codegenBlock system.body
    let body = bindingDecls ++ blockStmts
 
    return CFunction {..}
 
-declareBinding :: Int -> KirBinding -> CStmt
-declareBinding index binding = 
-   let bindingType = typeToCType binding.bindType
-   in CDeclStmt 
-      (CPointer bindingType) 
-      (bindingName (KirBindingId index)) 
-      (Just $
-         CInvoke (CVar "ecs_field")
-            [ CExprArg (CVar "it")
-            , CTypeArg bindingType
-            , CExprArg (CIntLit (toInteger index))
-            ]
-      )
+-- | Declares the pointer to a binding's component data. A tag component has
+--   no data (`ecs_field` would return NULL), so it declares nothing; the
+--   index is the binding's own, so the other bindings keep theirs.
+declareBinding :: Int -> KirBinding -> [CStmt]
+declareBinding index binding
+   | isUnitType binding.bindType = []
+   | otherwise =
+      let bindingType = typeToCType binding.bindType
+      in [CDeclStmt 
+         (CPointer bindingType) 
+         (bindingName (KirBindingId index)) 
+         (Just $
+            CInvoke (CVar "ecs_field")
+               [ CExprArg (CVar "it")
+               , CTypeArg bindingType
+               , CExprArg (CIntLit (toInteger index))
+               ]
+         )]
+
+-- | The type of something erased: it has no C representation to declare or assign.
+isUnitType :: Type -> Bool
+isUnitType (TyTuple []) = True
+isUnitType _            = False
 
 bindingName :: KirBindingId -> Text
 bindingName (KirBindingId index) = "_b" <> T.pack (show index)
@@ -99,8 +109,19 @@ codegenInstructs = fmap concat . mapM codegenInstruct
 
 codegenInstruct :: KirInstruct -> CCodegen [CStmt]
 codegenInstruct = \case
-   KirCall retType (KirName fnName) callArgs (KirName resultName) ->
-      pure [CDeclStmt (typeToCType retType) resultName (Just (CInvoke (CVar fnName) (map (CExprArg . valueToExpr) callArgs)))]
+   KirCall 
+      { ty = retType
+      , callee = KirName fnName
+      , args = callArgs
+      , out = out 
+      } -> do
+         let callArguments = callArgs |> map (CExprArg . valueToExpr)
+         let invocation = CInvoke (CVar fnName) callArguments
+         case out of
+            Just (KirName resultName) ->
+               pure [CDeclStmt (typeToCType retType) resultName (Just invocation)]
+            Nothing ->
+               pure [CExprStmt invocation]
    KirAssign bindingId value ->
       pure [CExprStmt (CAssign (CVar (bindingName bindingId)) (valueToExpr value))]
    KirStore storedType dest value -> pure $ case dest of
@@ -126,6 +147,7 @@ codegenMatch matchType scrutinee arms fallback dest exhaustive = do
       scrutExpr = valueToExpr scrutinee
 
       declStmt = case dest of
+         _ | isUnitType matchType -> []
          DestBinding _     -> []
          DestLocal localId -> [CDeclStmt (typeToCType matchType) (localName localId) Nothing]
 
@@ -142,11 +164,11 @@ codegenMatch matchType scrutinee arms fallback dest exhaustive = do
       codegenSwitch = do
          cases <- forM arms $ \(KirMatchArm { tag = tag, branch = branch }) -> do
             caseStmts <- codegenInstructs branch.instructs
-            pure (tagToExpr tag, caseStmts ++ [assignDest branch.value])
+            pure (tagToExpr tag, caseStmts ++ assignDest branch.value)
          defaultBranch <- case fallback of
             Just branch -> do
                defStmts <- codegenInstructs branch.instructs
-               pure (CDefaultStmts (defStmts ++ [assignDest branch.value]))
+               pure (CDefaultStmts (defStmts ++ assignDest branch.value))
             Nothing -> pure CDefaultUnreachable
          pure [CSwitch scrutExpr cases defaultBranch]
 
@@ -158,15 +180,18 @@ codegenMatch matchType scrutinee arms fallback dest exhaustive = do
          pure $ Just
             [ CIf
                (CBinary Eq scrutExpr (tagToExpr tag))
-               (armStmts ++ [assignDest branch.value])
+               (armStmts ++ assignDest branch.value)
                elseStmt
             ]
 
       codegenBranch branch = do
          defStmts <- codegenInstructs branch.instructs
-         pure (defStmts ++ [assignDest branch.value])
+         pure (defStmts ++ assignDest branch.value)
 
-      assignDest = assignToDest dest
+      -- a match with an erased result has nothing to assign
+      assignDest branchValue
+         | isUnitType matchType = []
+         | otherwise            = [assignToDest dest branchValue]
 
 assignToDest :: KirDest -> KirValue -> CStmt
 assignToDest dest value = case dest of
@@ -181,6 +206,7 @@ valueToExpr (KirConst constTag)       = tagToExpr constTag
 valueToExpr (KirVar (KirName name))   = CVar name
 valueToExpr (KirBindingRef bindingId) = CUnary Deref (CVar (bindingName bindingId))
 valueToExpr (KirLocalRef localId)     = CVar (localName localId)
+valueToExpr KirUnit                   = unreachableWith "KirUnit reached codegen, erasure should have removed it"
 
 tagToExpr :: KirTag -> CExpr
 tagToExpr (TagLit lit) = literalToExpr lit
@@ -193,6 +219,7 @@ literalToExpr lit              = todo__ ("no C representation for literal " ++ s
 
 typeToCType :: Type -> CType
 typeToCType = \case
+   TyTuple []            -> CVoid
    TyCon (Ident "Int")   -> CInt
    TyCon (Ident "Float") -> CFloat
    TyCon (Ident "Long")  -> CLong
