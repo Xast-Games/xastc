@@ -1,38 +1,68 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MultiWayIf #-}
 module Xast.Codegen.C.Pass where
 
-import Xast.Codegen.C.Types
-import Xast.Lowerer.Types
-import Xast.Codegen.C.Monad (CCodegen, runCodegen)
-import Control.Monad (forM)
 import Control.Monad.Identity (Identity(runIdentity))
-import Xast.Utils.Generic (todo__, unreachableWith, (|>))
-import Xast.AST (moduleToPath, IntLiteral(..), Literal(..), Type(..), Ident(..), typename)
-import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Maybe (fromMaybe, isJust)
 import Control.Monad.Reader (MonadReader(ask))
+import Control.Monad (forM)
+import Data.Text (Text)
+import Data.Maybe (fromMaybe, isJust)
+import qualified Data.Text as T
+
+import Xast.AST
+import Xast.Utils.Generic (todo__, unreachableWith, (|>))
+import Xast.Lowerer.Types
+import Xast.Codegen.C.Types
+import Xast.Codegen.C.Monad (CCodegen, runCodegen, CCodegenEnv (..))
+import qualified Xast.Utils.List as L
 
 codegen 
    :: [Kira] 
    -> [KirTypeDef]
+   -> [EcsTag]
    -> [CProgram]
-codegen kira typeDefs = 
-   let generated = do
+codegen kira typeDefs ecsTags = 
+   let env = CCodegenEnv typeDefs ecsTags
+       generated = do
          types    <- codegenTypeDefs
          programs <- forM kira codegenOne
          return (types : programs)
-   in runIdentity (runCodegen generated typeDefs)
+   in runIdentity (runCodegen generated env)
+
+typeDefsFilename :: FilePath
+typeDefsFilename = "xast_types.h"
 
 codegenTypeDefs :: CCodegen CProgram  
 codegenTypeDefs = do
-   types <- ask
-   -- decls <- forM types $ \td ->
-      -- if 
+   env <- ask
 
-   undefined
+   let tagDeclarations = env.ecsTags |> map CTagDef
+   let typeDeclarations = 
+         L.forFlat env.types $ \td -> if
+            | isPlainStruct td -> codegenStruct td
+            | isEnum td        -> codegenEnum td
+            | otherwise        -> codegenADT td
+
+   return CProgram 
+      { path = typeDefsFilename
+      , declarations = tagDeclarations ++ typeDeclarations
+      } 
+
+codegenStruct :: KirTypeDef -> [CDecl]
+codegenStruct td = 
+   let name = td.name.text
+       fields = (head td.ctors).fields
+         |> map (\(KirFieldDef fieldName ty) -> (fieldName.inner, typeToCType ty))
+
+   in [CStructDef CStructDefinition {..}]
+
+codegenEnum :: KirTypeDef -> [CDecl]
+codegenEnum td = []
+
+codegenADT :: KirTypeDef -> [CDecl]
+codegenADT td = []
 
 codegenOne :: Kira -> CCodegen CProgram
 codegenOne kira = do
@@ -220,8 +250,14 @@ literalToExpr lit              = todo__ ("no C representation for literal " ++ s
 typeToCType :: Type -> CType
 typeToCType = \case
    TyTuple []            -> CVoid
-   TyCon (Ident "Int")   -> CInt
-   TyCon (Ident "Float") -> CFloat
-   TyCon (Ident "Long")  -> CLong
-   TyCon name            -> CStruct name.inner
+   TyCon qualified       -> namedCType qualified.name.inner
    other                 -> todo__ ("no C representation for type " ++ typename other)
+
+-- | C type of a named type. Extern types keep their bare name, while user types
+--   arrive monomorphized, already named with their module prefix.
+namedCType :: Text -> CType
+namedCType = \case
+   "Int"   -> CInt
+   "Float" -> CFloat
+   "Long"  -> CLong
+   name    -> CStruct name

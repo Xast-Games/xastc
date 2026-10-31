@@ -12,7 +12,7 @@ import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Query
 import Control.Applicative ((<|>))
 import Xast.Utils.Generic (unreachableWith)
-import Xast.SemAnalyzer.TypeUtils (ctorType, literalType)
+import Xast.SemAnalyzer.TypeUtils (ctorType, listType, literalType)
 import Xast.SemAnalyzer.Unify (freshTyVar, freshVarId, unify)
 
 inferPattern
@@ -29,13 +29,14 @@ inferPattern imports ty pattern = case pattern of
       pure (PatWildcard (TypedInfo location ty maybeResolution), M.empty)
 
    PatLit (ResolvedInfo location maybeResolution) literal -> do
-      literalTy <- literalType literal
+      literalTy <- literalType imports literal
       unify location ty literalTy
       pure (PatLit (TypedInfo location ty maybeResolution) literal, M.empty)
 
    PatList (ResolvedInfo location maybeResolution) patterns -> do
       elementTypeVar <- freshTyVar
-      unify location ty (TyApp (TyCon (Ident "List")) elementTypeVar)
+      patternListType <- listType imports elementTypeVar
+      unify location ty patternListType
       inferred <- mapM (inferPattern imports elementTypeVar) patterns
       let (typedPatterns, varMaps) = unzip inferred
       pure (PatList (TypedInfo location ty maybeResolution) typedPatterns, M.unions varMaps)

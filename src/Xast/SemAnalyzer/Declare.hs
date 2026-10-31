@@ -86,8 +86,12 @@ declareFn ident funcDef@(FuncDef loc _ fnIdent fnArgs _) = do
    declareSymbol ident (SymbolFn loc functionId (funcSig funcDef)) SEFnRedeclaration
 
 declareType :: Ident -> TypeDef -> SemAnalyzer ()
-declareType ident (TypeDef loc modifiers _ generics ctors) = do
-   let ctorNames = S.fromList [ctor.name | ctor <- ctors]
+declareType ident typeDef@(TypeDef loc modifiers _ generics ctors) = do
+   checkTagType typeDef
+
+   QualifiedName currentModule _ <- qualify ident
+   let owner = QualifiedIdent { moduleName = Just currentModule, name = ident }
+       ctorNames = S.fromList [ctor.name | ctor <- ctors]
        typeSig = TypeSig ctorNames generics (TypeMod ModNonExhaustive `elem` modifiers)
 
    case [ctor | ctor <- ctors, ctor.name == ident] of
@@ -95,7 +99,7 @@ declareType ident (TypeDef loc modifiers _ generics ctors) = do
          let (fieldNames, fieldTypes) = payloadFields selfCtor.payload
          constructorId <- freshConstructorId
          declareSymbol ident
-               (SymbolTypeCtor loc typeSig constructorId (CtorSig ident generics fieldNames fieldTypes))
+               (SymbolTypeCtor loc typeSig constructorId (CtorSig owner generics fieldNames fieldTypes))
                SETypeRedeclaration
       _ ->
          declareSymbol ident (SymbolType loc typeSig) SETypeRedeclaration
@@ -105,13 +109,32 @@ declareType ident (TypeDef loc modifiers _ generics ctors) = do
          let (fieldNames, fieldTypes) = payloadFields ctor.payload
          constructorId <- freshConstructorId
          declareSymbol ctor.name
-               (SymbolCtor ctor.location constructorId (CtorSig ident generics fieldNames fieldTypes))
+               (SymbolCtor ctor.location constructorId (CtorSig owner generics fieldNames fieldTypes))
                SECtorRedeclaration
    where
       payloadFields = \case
          PUnit -> (Nothing, [])
          (PTuple types) -> (Nothing, map (.node) types)
          (PRecord fields) -> (Just (map (.name) fields), map ((.node) . (.ty)) fields)
+
+-- | A @Tag type is a plain marker component, so it must look like @type X = X;@.
+checkTagType :: TypeDef -> SemAnalyzer ()
+checkTagType typeDef =
+   let isTag = TypeMod ModTag `elem` typeDef.modifiers
+       invalidTag = SEInvalidTagType typeDef.location typeDef.name
+   in when (isTag && not (isPlainMarker typeDef)) $
+         errSem invalidTag
+
+-- | Whether a type has no type parameters and a single constructor without fields.
+isPlainMarker :: TypeDef -> Bool
+isPlainMarker typeDef = case typeDef.ctors of
+   [ctor] -> null typeDef.generics && hasNoPayload ctor
+   _      -> False
+
+hasNoPayload :: Ctor -> Bool
+hasNoPayload ctor = case ctor.payload of
+   PUnit -> True
+   _     -> False
 
 declareExternFn :: Ident -> ExternFunc -> SemAnalyzer ()
 declareExternFn ident externFunc@(ExternFunc loc _ _ _ _) = do

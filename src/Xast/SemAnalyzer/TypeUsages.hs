@@ -4,71 +4,141 @@
 module Xast.SemAnalyzer.TypeUsages where
 
 import Control.Monad.State
-import Control.Monad (forM_)
-import Data.Maybe (fromMaybe)
+import Control.Monad (forM, forM_)
 import Xast.AST
 import Xast.Error.Types
 import Xast.SemAnalyzer.Monad
 import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Query
-import Control.Applicative ((<|>))
+import qualified Data.Map as M
+import Xast.Utils.Generic ((|>))
 
 -- #### RESOLVE TYPE USAGES ####
 
-resolveTypeUsages :: Program Parsed -> SemAnalyzer ()
-resolveTypeUsages (Program (ModuleDef _ moduleName _) imports stmts _) = do
-   modify $ \symTable -> symTable { currentModule = moduleName }
-   forM_ stmts (resolveStmtTypeUsages imports)
+-- | Fills in the declaring module of every type written in the program and in
+--   the signatures of its symbols, which were declared before imports were known.
+resolveTypeUsages :: Program Parsed -> SemAnalyzer (Program Parsed)
+resolveTypeUsages (Program moduleDef imports stmts source) = do
+   modify $ \symTable -> symTable { currentModule = moduleDef.name }
+   qualifiedStmts <- forM stmts (qualifyStmt imports)
+   refreshSignatures qualifiedStmts
+   pure (Program moduleDef imports qualifiedStmts source)
 
-resolveStmtTypeUsages :: [Located ImportDef] -> Stmt Parsed -> SemAnalyzer ()
-resolveStmtTypeUsages imports stmt =
-   let checkLocatedType (Located loc typeOfNode) = checkType imports loc typeOfNode
+qualifyStmt :: [Located ImportDef] -> Stmt Parsed -> SemAnalyzer (Stmt Parsed)
+qualifyStmt imports stmt =
+   let qualify = qualifyLocated imports
    in case stmt of
-      StmtTypeDef (TypeDef _ _ _ _ ctors) ->
-         forM_ ctors $ \ctor ->
-            forM_ (payloadTypes ctor.payload) checkLocatedType
+      StmtTypeDef (TypeDef location modifiers name generics ctors) -> do
+         qualifiedCtors <- forM ctors (qualifyCtor imports)
+         pure $ StmtTypeDef (TypeDef location modifiers name generics qualifiedCtors)
 
-      StmtFunc (FnDef (FuncDef _ _ _ args retType)) ->
-         forM_ (retType : args) checkLocatedType
+      StmtFunc (FnDef (FuncDef location modifiers name args retType)) -> do
+         qualifiedArgs <- forM args qualify
+         qualifiedRetType <- qualify retType
+         pure $ StmtFunc (FnDef (FuncDef location modifiers name qualifiedArgs qualifiedRetType))
 
-      StmtFunc (FnImpl _) -> pure ()
+      StmtExtern (ExtFunc (ExternFunc location modifiers name args retType)) -> do
+         qualifiedArgs <- forM args qualify
+         qualifiedRetType <- qualify retType
+         pure $ StmtExtern (ExtFunc (ExternFunc location modifiers name qualifiedArgs qualifiedRetType))
 
-      StmtExtern (ExtFunc (ExternFunc _ _ _ args retType)) ->
-         forM_ (retType : args) checkLocatedType
+      StmtSystem (SysDef (SystemDef location modifiers name entities retType with)) -> do
+         qualifiedEntities <- forM entities $ \(QueriedEntity entityTypes) ->
+            QueriedEntity <$> forM entityTypes qualify
+         qualifiedRetType <- qualify retType
+         qualifiedWith <- forM with (mapM (qualifyWithType imports))
+         pure $ StmtSystem (SysDef (SystemDef location modifiers name qualifiedEntities qualifiedRetType qualifiedWith))
 
-      StmtExtern (ExtType _) -> pure ()
+      other -> pure other
 
-      StmtSystem (SysDef (SystemDef _ _ _ entities retType with)) -> do
-         forM_ entities $ \(QueriedEntity entityTypes) -> forM_ entityTypes checkLocatedType
-         checkLocatedType retType
-         forM_ (fromMaybe [] with) (checkLocatedType . withTypeLoc)
+qualifyCtor :: [Located ImportDef] -> Ctor -> SemAnalyzer Ctor
+qualifyCtor imports (Ctor location name payload) = do
+   qualifiedPayload <- case payload of
+      PUnit -> pure PUnit
+      PTuple types -> PTuple <$> forM types (qualifyLocated imports)
+      PRecord fields -> PRecord <$> forM fields (qualifyField imports)
+   pure (Ctor location name qualifiedPayload)
 
-      StmtSystem (SysImpl _) -> pure ()
+qualifyField :: [Located ImportDef] -> Field -> SemAnalyzer Field
+qualifyField imports (Field name fieldType) =
+   Field name <$> qualifyLocated imports fieldType
+
+qualifyWithType :: [Located ImportDef] -> WithType -> SemAnalyzer WithType
+qualifyWithType imports = \case
+   WithEvent eventType  -> WithEvent <$> qualifyLocated imports eventType
+   WithRes resourceType -> WithRes <$> qualifyLocated imports resourceType
+
+-- | Qualifies a type written in the source, reporting the names that are not in scope.
+qualifyLocated :: [Located ImportDef] -> Located Type -> SemAnalyzer (Located Type)
+qualifyLocated imports (Located location writtenType) = do
+   let reportUnknown name = errSem (SEUndefinedType location name)
+   qualifiedType <- qualifyType imports reportUnknown writtenType
+   pure (Located location qualifiedType)
+
+-- | Fills in the declaring module of every named type in a type.
+qualifyType
+   :: [Located ImportDef]
+   -> (TypeName -> SemAnalyzer ())  -- ^ what to do with a name that is not in scope
+   -> Type
+   -> SemAnalyzer Type
+qualifyType imports reportUnknown type' =
+   let qualifyInner = qualifyType imports reportUnknown
+   in case type' of
+      TyCon (QualifiedIdent (Just _) _) -> pure type'
+      TyCon (QualifiedIdent Nothing name) -> do
+         declaringModule <- findTypeModule imports name
+         case declaringModule of
+            Just module' -> pure (typeIn module' name)
+            Nothing      -> reportUnknown name >> pure type'
+      TyApp func arg       -> TyApp <$> qualifyInner func <*> qualifyInner arg
+      TyTuple elementTypes -> TyTuple <$> mapM qualifyInner elementTypes
+      TyFn args ret        -> TyFn <$> mapM qualifyInner args <*> qualifyInner ret
+      TyGnr _              -> pure type'
+      TyVar _              -> pure type'
+      TyInt _              -> pure type'
+      TyInvalid            -> pure type'
+
+-- | Rebuilds the signatures of the current module's symbols from the qualified
+--   declarations.
+refreshSignatures :: [Stmt Parsed] -> SemAnalyzer ()
+refreshSignatures stmts = forM_ stmts $ \case
+   StmtFunc (FnDef funcDef) -> updateSymbol funcDef.name $ \case
+      SymbolFn location functionId _ -> SymbolFn location functionId (funcSig funcDef)
+      other                          -> other
+
+   StmtExtern (ExtFunc externFunc) -> updateSymbol externFunc.name $ \case
+      SymbolExternFn location externId _ -> SymbolExternFn location externId (externFuncSig externFunc)
+      other                              -> other
+
+   StmtSystem (SysDef systemDef) -> updateSymbol systemDef.name $ \case
+      SymbolSystem location _ -> SymbolSystem location (systemSig systemDef)
+      other                   -> other
+
+   StmtTypeDef typeDef -> forM_ typeDef.ctors $ \ctor ->
+      updateSymbol ctor.name (withCtorFieldTypes ctor)
+
+   _ -> pure ()
+
+-- | Replaces the field types in a constructor's signature with the ones of its declaration.
+withCtorFieldTypes :: Ctor -> SymbolInfo -> SymbolInfo
+withCtorFieldTypes ctor symbol =
+   let fieldTypes = payloadTypes ctor.payload |> map (.node)
+       withFields (CtorSig owner generics fieldNames _) = CtorSig owner generics fieldNames fieldTypes
+   in case symbol of
+      SymbolCtor location constructorId signature ->
+         SymbolCtor location constructorId (withFields signature)
+      SymbolTypeCtor location typeSignature constructorId signature ->
+         SymbolTypeCtor location typeSignature constructorId (withFields signature)
+      other -> other
+
+-- | Changes a symbol of the current module in place.
+updateSymbol :: Ident -> (SymbolInfo -> SymbolInfo) -> SemAnalyzer ()
+updateSymbol ident change = modify $ \symTable ->
+   let changeModule (ModuleInfo symbols exports) = ModuleInfo (M.adjust change ident symbols) exports
+   in symTable { modules = M.adjust changeModule symTable.currentModule symTable.modules }
 
 payloadTypes :: Payload -> [Located Type]
 payloadTypes = \case
    PUnit          -> []
    PTuple types   -> types
    PRecord fields -> map (.ty) fields
-
-withTypeLoc :: WithType -> Located Type
-withTypeLoc (WithEvent locatedType) = locatedType
-withTypeLoc (WithRes locatedType)   = locatedType
-
--- | Recursively resolves every `TyCon` occurring in a type against the
--- current module's declarations and its unqualified imports.
-checkType :: [Located ImportDef] -> Location -> Type -> SemAnalyzer ()
-checkType imports loc = \case
-   TyCon ident -> do
-      currentModuleSymbol <- lookupCurrentTypeName ident
-      importedSymbol <- lookupUnqualifiedTypeName imports ident
-      case currentModuleSymbol <|> importedSymbol of
-         Just _  -> pure ()
-         Nothing -> errSem (SEUndefinedType loc ident)
-   TyApp func arg       -> checkType imports loc func >> checkType imports loc arg
-   TyTuple elementTypes -> forM_ elementTypes (checkType imports loc)
-   TyFn args ret        -> forM_ args (checkType imports loc) >> checkType imports loc ret
-   TyGnr _              -> pure ()
-   TyVar _              -> pure ()
-   TyInt _              -> pure ()
-   TyInvalid            -> pure ()

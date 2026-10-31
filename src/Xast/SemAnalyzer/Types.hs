@@ -99,7 +99,7 @@ data SymbolInfo
    deriving (Eq, Show)
 
 data CtorSig = CtorSig
-   { owner        :: TypeName
+   { owner        :: QualifiedIdent  -- ^ the type the constructor builds
    , generics     :: [GenericName]
    , fieldNames   :: Maybe [FieldName] -- `Just` field names when declared as a record, `Nothing` otherwise
    , fields       :: [Type]

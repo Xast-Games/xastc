@@ -9,11 +9,17 @@ import Xast.Lowerer.Types
 import Xast.Utils.Generic ((|>), unreachableWith)
 import Xast.AST
 
-eraseZeroSized :: [Kira] -> [KirTypeDef] -> ([Kira], [KirTypeDef])
+data EraseResult = EraseResult
+   { programs  :: [Kira]
+   , types     :: [KirTypeDef]
+   , ecsTags   :: [KirName]
+   }
+
+eraseZeroSized :: [Kira] -> [KirTypeDef] -> EraseResult
 eraseZeroSized kira typeDefs =
    let context = newErasureContext kira typeDefs
        zstNames = context.zstTypes
-       realTypeDefs = typeDefs |> filter (not . isZeroSizedTypeDef zstNames)
+       (zeroTypeDefs, realTypeDefs) = typeDefs |> partition (isZeroSizedTypeDef zstNames)
        erasedTypeDefs =
          L.forEach realTypeDefs $ \typeDef ->
             let realCtors =
@@ -26,10 +32,18 @@ eraseZeroSized kira typeDefs =
             in KirTypeDef
                { name = typeDef.name
                , ctors = realCtors
+               , mods = typeDef.mods
                }
+       tags = zeroTypeDefs
+         |> filter isTag
+         |> map (.name)
        erasedKira = L.forEach kira (eraseProgram context)
 
-   in (erasedKira, erasedTypeDefs)
+   in EraseResult 
+      { programs  = erasedKira
+      , types     = erasedTypeDefs
+      , ecsTags   = tags
+      }
 
 -- | What the erasure of one function did to its signature.
 data ErasedSignature = ErasedSignature
@@ -367,7 +381,7 @@ isErasedValue env = \case
 
 isZeroSized :: S.Set KirName -> Type -> Bool
 isZeroSized zstNames = \case
-   TyCon name -> KirName name.inner `S.member` zstNames
+   TyCon qualified -> KirName qualified.name.inner `S.member` zstNames
    TyTuple [] -> True
    TyFn _ _   -> False
    other      -> unreachableWith $ "invalid type in EraseZero phase: " <> show other
@@ -430,7 +444,7 @@ notUnit _ = True
 
 fieldTypeName :: Type -> Maybe KirName
 fieldTypeName = \case
-   TyCon name -> Just (KirName name.inner)
+   TyCon qualified -> Just (KirName qualified.name.inner)
    TyFn _ _   -> Nothing
    TyTuple [] -> Nothing
    other      -> unreachableWith $ "invalid type in EraseZero phase: " <> show other

@@ -5,7 +5,7 @@ import Xast.AST
 import Xast.Lowerer.Monad (Lowerer, freshKirName, freshKirLocalId)
 import Xast.Lowerer.Types
 import Xast.Lowerer.DecisionTree
-import Xast.Lowerer.Mono (monoType, mangleCtor)
+import Xast.Lowerer.Mono (monoType, mangleCtor, qualifiedCtor)
 import Control.Monad (forM, foldM)
 import Control.Monad.State (gets)
 import Xast.Utils.Generic (todo__)
@@ -63,8 +63,8 @@ rowPatterns tupled columnCount = \case
    _ -> todo__ "pattern does not match the scrutinee columns"
 
 toPat
-   :: M.Map ConstructorId Int  -- ^ constructor id -> number of constructors of its type
-   -> M.Map Ident [Ident]      -- ^ constructor name -> its declared field names
+   :: M.Map ConstructorId Int       -- ^ constructor id -> number of constructors of its type
+   -> M.Map QualifiedIdent [Ident]  -- ^ constructor -> its declared field names
    -> Pattern Desugared
    -> Pat
 toPat spans fieldNamesOfCtor = \case
@@ -83,7 +83,7 @@ toPat spans fieldNamesOfCtor = \case
       case info.res of
          Just (ResConstructor cid) ->
             let span' = M.findWithDefault maxBound cid spans
-                declaredFieldNames = M.findWithDefault [] ident fieldNamesOfCtor
+                declaredFieldNames = M.findWithDefault [] (qualifiedCtor info.ty ident) fieldNamesOfCtor
                 constructor = Con (TagCtor (mangleCtor info.ty ident)) (length args) span' (map patTy args) declaredFieldNames
             in PCon constructor (map (toPat spans fieldNamesOfCtor) args)
          _ -> todo__ ("unresolved constructor pattern " ++ show ident)
@@ -142,16 +142,18 @@ lowerTreeInto context state dest = \case
          Just found -> found.instructs ++ [KirStore context.ctxTy dest found.value]
          Nothing -> []
 
+   -- a type with a single constructor has no tag to test: the pattern always matches
+   DTSwitch occ [(constructor, subTree)] _ | isOnlyConstructor constructor -> do
+      (prefix, scrutState, _) <- resolveOcc state occ
+      let armState = withConstructorFields occ constructor scrutState
+      subInstrs <- lowerTreeInto context armState dest subTree
+      pure (prefix ++ subInstrs)
+
    DTSwitch occ cases def -> do
       (prefix, scrutState, scrut) <- resolveOcc state occ
 
       armBranches <- forM cases $ \(constructor, subTree) -> do
-         let childFields = M.fromList
-               [ (occField occ fieldIndex, OccField { fieldType = fieldType, ctor = ctor, fieldName = fieldName })
-               | TagCtor ctor <- [constructor.tag]
-               , (fieldIndex, fieldType, fieldName) <- zip3 [0 ..] constructor.fieldTys constructor.fieldNames
-               ]
-         let armState = OccState { vals = scrutState.vals, fields = M.union childFields scrutState.fields }
+         let armState = withConstructorFields occ constructor scrutState
          branch <- lowerBranch context armState subTree
          pure (constructor, branch)
 
@@ -171,6 +173,26 @@ lowerTreeInto context state dest = \case
          , dest = dest
          , exhaustive = exhaustive
          }])
+
+-- | Whether a constructor is the only one of its type, e.g. @B@ in @type A = B Int@.
+isOnlyConstructor :: Con -> Bool
+isOnlyConstructor constructor = case constructor.tag of
+   TagCtor _ -> constructor.span == 1
+   TagLit _  -> False
+
+-- | Makes the fields of a matched constructor known as children of its occurrence.
+withConstructorFields
+   :: Occ       -- ^ occurrence the constructor was matched on
+   -> Con       -- ^ the matched constructor
+   -> OccState
+   -> OccState
+withConstructorFields occ constructor state =
+   let childFields = M.fromList
+         [ (occField occ fieldIndex, OccField { fieldType = fieldType, ctor = ctor, fieldName = fieldName })
+         | TagCtor ctor <- [constructor.tag]
+         , (fieldIndex, fieldType, fieldName) <- zip3 [0 ..] constructor.fieldTys constructor.fieldNames
+         ]
+   in OccState { vals = state.vals, fields = M.union childFields state.fields }
 
 lowerBranch :: DTCtx -> OccState -> DecisionTree -> Lowerer (Maybe KirBranch)
 lowerBranch context state = \case

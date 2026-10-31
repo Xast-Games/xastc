@@ -23,8 +23,8 @@ tests = TestList
 -- Fixtures ------------------------------------------------------------------
 
 unitType, intType, erasedType :: Type
-unitType   = TyCon (Ident "Unit")
-intType    = TyCon (Ident "Int")
+unitType   = unresolvedType (Ident "Unit")
+intType    = unresolvedType (Ident "Int")
 erasedType = TyTuple []
 
 unitCtor :: CtorName
@@ -92,8 +92,8 @@ var = KirVar . KirName
 -- | Erases one program and returns it with the erased type definitions.
 eraseOne :: Kira -> (Kira, [KirTypeDef])
 eraseOne program =
-   let (erasedPrograms, erasedDefs) = eraseZeroSized [program] typeDefs
-   in (head erasedPrograms, erasedDefs)
+   let erased = eraseZeroSized [program] typeDefs
+   in (head erased.programs, erased.types)
 
 erasedFunctionNamed :: Text -> Kira -> KirFunction
 erasedFunctionNamed functionName program =

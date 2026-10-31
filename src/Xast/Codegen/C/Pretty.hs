@@ -2,6 +2,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Xast.Codegen.C.Pretty where
 
+import Xast.Lowerer.Types (KirName(..))
 import Xast.Codegen.C.Types
 import Prettyprinter (Doc, Pretty (pretty), hardline, (<+>), encloseSep, vsep, indent, enclose)
 import Xast.Utils.Pretty (bold, cyan)
@@ -28,9 +29,13 @@ prettyProgram program =
 prettyDecl :: CDecl -> Doc ann
 prettyDecl (CFunc func) = prettyFunction func <> hardline
 prettyDecl (CGlob global) = prettyGlobal global <> hardline
+prettyDecl (CTagDef ecsTag) = prettyEcsTag ecsTag <> hardline
 prettyDecl (CStructDef struct) = prettyStructDef struct <> hardline
 prettyDecl (CEnumDef enum) = prettyEnumDef enum <> hardline
 prettyDecl (CTaggedUnionDef taggedUnion) = prettyTaggedUnionDef taggedUnion <> hardline
+
+prettyEcsTag :: EcsTag -> Doc ann
+prettyEcsTag tag = "ECS_TAG(" <> pretty tag.text <> ");"
 
 prettyTaggedUnionDef :: CTaggedUnionDefinition -> Doc ann
 prettyTaggedUnionDef taggedUnion = 

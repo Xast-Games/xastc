@@ -13,8 +13,8 @@ import Xast.SemAnalyzer.Monad
 import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Query
 import Control.Applicative ((<|>))
-import Xast.SemAnalyzer.TypeUtils (applyTypes, boolType, compareListElems, compareThenElse, compareTypes, ctorType, literalType)
-import Xast.SemAnalyzer.Exhaustive (checkMatchExhaustive, patOf, typeHead)
+import Xast.SemAnalyzer.TypeUtils (applyTypes, boolType, compareListElems, compareThenElse, compareTypes, ctorType, genericList, listType, literalType)
+import Xast.SemAnalyzer.Exhaustive (checkMatchExhaustive, lookupDeclaringModule, patOf, typeHead)
 import Xast.SemAnalyzer.InferPattern (inferPattern)
 import Xast.SemAnalyzer.Unify (freshTyVar, generalize, instantiate, resolve, substTyVars, typeOf, unify)
 
@@ -24,7 +24,7 @@ inferType
    -> SemAnalyzer (Expr Typed)
 inferType imports expression = case expression of
    ExpLit (ResolvedInfo location maybeResolution) literal -> do
-      exprType <- literalType literal
+      exprType <- literalType imports literal
       pure $ ExpLit (TypedInfo location exprType maybeResolution) literal
 
    ExpVar (ResolvedInfo location maybeResolution) Nothing name -> do
@@ -84,7 +84,7 @@ inferType imports expression = case expression of
       pure $ ExpTuple (TypedInfo location (TyTuple (map typeOf typedElements)) maybeResolution) typedElements
 
    ExpList (ResolvedInfo location maybeResolution) [] -> do
-      exprType <- TyApp (TyCon (Ident "List")) <$> freshTyVar
+      exprType <- genericList imports
       pure $ ExpList (TypedInfo location exprType maybeResolution) []
 
    ExpList (ResolvedInfo location maybeResolution) (first:rest) -> do
@@ -97,13 +97,14 @@ inferType imports expression = case expression of
             (exprAnnotation other).location (typeOf other)
       -- Type of list is defined as `List a`,
       -- where a is a type of the first element
-      let exprType = TyApp (TyCon (Ident "List")) (typeOf typedFirst)
+      exprType <- listType imports (typeOf typedFirst)
       pure $ ExpList (TypedInfo location exprType maybeResolution) (typedFirst:typedRest)
 
    ExpIfThen (ResolvedInfo location maybeResolution) (IfThenElse condition thenBranch elseBranch) -> do
       -- Compare `if` type with Bool
       typedCondition <- inferType imports condition
-      compareTypes (exprAnnotation typedCondition).location (typeOf typedCondition) boolType
+      conditionType <- boolType imports
+      compareTypes (exprAnnotation typedCondition).location (typeOf typedCondition) conditionType
       -- Compare `then` and `else` types
       typedThen <- inferType imports thenBranch
       typedElse <- inferType imports elseBranch
@@ -215,14 +216,13 @@ recordFieldsOf imports location recordType = case typeHead recordType of
    Nothing -> do
       errSem (SENotARecordType location recordType)
       pure Nothing
-   Just ctorName -> do
-      moduleCtor <- lookupCurrentConstructor ctorName
-      importedCtor <- lookupUnqualifiedConstructor imports ctorName
-      case moduleCtor <|> importedCtor of
+   Just qualified -> do
+      -- a record type shares its name with its constructor
+      let ctorName = qualified.name
+      declared <- lookupDeclaringModule qualified
+      case declared >>= asConstructor of
          Just symbol@(SymbolCtor _ _ (CtorSig _ _ (Just fieldNames) _)) -> do
-            moduleType <- lookupCurrentConType ctorName
-            importedType <- lookupUnqualifiedConType imports ctorName
-            case moduleType <|> importedType of
+            case declared >>= asType of
                Just (SymbolType _ (TypeSig ctors _ _)) | S.size ctors > 1 -> do
                   errSem (SEAmbiguousRecordAccess location ctorName (S.toList (S.delete ctorName ctors)))
                   pure Nothing

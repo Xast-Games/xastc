@@ -7,11 +7,12 @@ import qualified Data.Map as M
 import qualified Data.Text as T
 import Data.Text (Text)
 import Text.Read (readMaybe)
-import Control.Monad (forM, unless)
+import Control.Monad (forM, forM_, unless)
 import Control.Monad.State (gets, modify)
 import Control.Monad.Writer (tell)
 import Xast.Lowerer.Monad (Lowerer)
 import Xast.Lowerer.Types
+import Xast.Utils.Generic ((|>))
 
 splitApp :: Type -> (Type, [Type])
 splitApp = go []
@@ -29,14 +30,14 @@ subst substitution = \case
 
 monoType :: Type -> Lowerer Type
 monoType type' = case splitApp type' of
-   (TyCon name, args) -> do
-      isUser <- gets (M.member name . (.typeTmpls))
+   (TyCon qualified, args) -> do
+      isUser <- gets (M.member qualified . (.typeTmpls))
       if not isUser then 
          pure type'
       else do
          mapM_ monoType args
-         kirName <- requestType (TypeInst name args)
-         pure (TyCon (Ident kirName.text))
+         kirName <- requestType (TypeInst qualified args)
+         pure (monomorphicType kirName)
 
    _ -> case type' of
       TyTuple [single] -> monoType single
@@ -44,10 +45,15 @@ monoType type' = case splitApp type' of
          mapM_ monoType elementTypes
          let tupleInst = TypeInst (tupleName (length elementTypes)) elementTypes
          tupleKirName <- requestType tupleInst
-         return $ TyCon (Ident tupleKirName.text)
+         return (monomorphicType tupleKirName)
 
       TyFn params result -> TyFn <$> mapM monoType params <*> monoType result
       _                  -> pure type'
+
+-- | The type of a monomorphized instance. Its name is already the final flat name,
+--   module prefix included, so it is not qualified again.
+monomorphicType :: KirName -> Type
+monomorphicType kirName = TyCon QualifiedIdent { moduleName = Nothing, name = Ident kirName.text }
 
 requestType :: TypeInst -> Lowerer KirName
 requestType instance' = gets (M.lookup instance' . (.typeInsts)) >>= \case
@@ -59,6 +65,24 @@ requestType instance' = gets (M.lookup instance' . (.typeInsts)) >>= \case
          , typeQueue = instance' : state.typeQueue
          }
       pure kirName
+
+-- | Requests every @Tag type up front. Other types are instantiated only when
+--   a function or system uses them, but a tag is an ECS component that must
+--   exist even if no code mentions it.
+requestTagTypes :: Lowerer ()
+requestTagTypes = do
+   templates <- gets (M.toList . (.typeTmpls))
+   let tagTypeNames = templates
+         |> filter (\(_, template) -> isTagTemplate template)
+         |> map fst
+   forM_ tagTypeNames $ \typeName ->
+      requestType TypeInst { name = typeName, args = [] }
+
+-- | A non-generic type marked @Tag (generic tags are rejected by the semantic analyzer).
+isTagTemplate :: TypeDef -> Bool
+isTagTemplate template =
+   let tag = TypeMod ModTag `elem` template.modifiers
+   in tag && null template.generics
 
 drainTypes :: Lowerer ()
 drainTypes = gets (.typeQueue) >>= \case
@@ -88,15 +112,19 @@ buildTupleDef arity instance' = do
    return KirTypeDef
       { name  = KirName mangledName
       , ctors = [ctor]
+      , mods = []
       }
 
-tupleName :: Int -> Ident
-tupleName arity = Ident ("tup" <> tshow arity)
+-- | Tuples are not declared in any module, so their name has none.
+tupleName :: Int -> QualifiedIdent
+tupleName arity = QualifiedIdent { moduleName = Nothing, name = Ident ("tup" <> tshow arity) }
 
-tupleArity :: Ident -> Maybe Int
-tupleArity name = do
-   digits <- T.stripPrefix "tup" name.inner
-   readMaybe (T.unpack digits)
+tupleArity :: QualifiedIdent -> Maybe Int
+tupleArity qualified = case qualified.moduleName of
+   Just _  -> Nothing
+   Nothing -> do
+      digits <- T.stripPrefix "tup" qualified.name.inner
+      readMaybe (T.unpack digits)
 
 buildUserTypeDef :: TypeInst -> Lowerer KirTypeDef
 buildUserTypeDef instance' = do
@@ -120,10 +148,32 @@ buildUserTypeDef instance' = do
    return KirTypeDef 
       { name = KirName (mangle instance')
       , ctors = ctors 
+      , mods = template.modifiers |> map asTypeModifier
       }
 
-mangleCtor :: Type -> Ident -> Ident
-mangleCtor resultType ctorName = Ident (mangle (TypeInst ctorName (snd (splitApp resultType))))
+asTypeModifier :: Modifier -> TypeModifier
+asTypeModifier = \case
+   TypeMod m -> m
+   _ -> error "Cannot extract non-type modifier as type"
+
+-- | Name of a constructor once its type has been instantiated.
+mangleCtor
+   :: Type      -- ^ the constructor's result type, e.g. @A Int@
+   -> CtorName  -- ^ the constructor's own name, e.g. @B@
+   -> CtorName
+mangleCtor resultType ctorName =
+   let (_, typeArgs) = splitApp resultType
+       ctorInstance = TypeInst { name = qualifiedCtor resultType ctorName, args = typeArgs }
+   in Ident (mangle ctorInstance)
+
+-- | A constructor qualified with the module of its type, which also declares it.
+qualifiedCtor
+   :: Type      -- ^ the constructor's result type, e.g. @A Int@
+   -> CtorName
+   -> QualifiedIdent
+qualifiedCtor resultType ctorName = case splitApp resultType of
+   (TyCon typeName, _) -> QualifiedIdent { moduleName = typeName.moduleName, name = ctorName }
+   _                   -> QualifiedIdent { moduleName = Nothing, name = ctorName }
 
 ctorResultTy :: Type -> Type
 ctorResultTy = \case
@@ -131,12 +181,19 @@ ctorResultTy = \case
    other         -> other
 
 mangle :: TypeInst -> Text
-mangle instance' = T.intercalate "_" (instance'.name.inner : map mangleArg instance'.args)
+mangle instance' = T.intercalate "_" (flatName instance'.name : map mangleArg instance'.args)
+
+-- | A declared name flattened into one identifier: 
+--   prefixed with its module, if it has one.
+flatName :: QualifiedIdent -> Text
+flatName qualified = case qualified.moduleName of
+   Just module' -> namespacedName module' qualified.name
+   Nothing      -> qualified.name.inner
 
 mangleArg :: Type -> Text
 mangleArg type' = case splitApp type' of
-   (TyCon name, [])   -> name.inner
-   (TyCon name, args) -> wrap (mangle (TypeInst name args))
+   (TyCon qualified, [])   -> flatName qualified
+   (TyCon qualified, args) -> wrap (mangle (TypeInst qualified args))
    _                  -> case type' of
       TyTuple elements   -> wrap (mangle (TypeInst (tupleName (length elements)) elements))
       TyFn params result -> wrap (joinToken ("fn"  <> tshow (length params)) (params ++ [result]))

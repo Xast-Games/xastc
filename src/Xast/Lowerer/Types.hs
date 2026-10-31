@@ -9,15 +9,15 @@ import Xast.Utils.Generic ((|>))
 
 data LowerState = LowerState
    { nameSupply :: Int
-   , typeTmpls  :: M.Map TypeName TypeDef
+   , typeTmpls  :: M.Map QualifiedIdent TypeDef
    , typeInsts  :: M.Map TypeInst KirName
    , typeQueue  :: [TypeInst]
    , ctorSpans  :: M.Map ConstructorId Int
-   , ctorFieldNames :: M.Map CtorName [FieldName]  -- ^ declared field names of each constructor
+   , ctorFieldNames :: M.Map QualifiedIdent [FieldName]  -- ^ declared field names of each constructor
    }
 
 data TypeInst = TypeInst
-   { name :: Ident
+   { name :: QualifiedIdent
    , args :: [Type]
    }
    deriving (Eq, Ord, Show)
@@ -30,13 +30,17 @@ newLowerState spans progs = LowerState
    { nameSupply   = 0
    , ctorSpans    = spans
    , typeTmpls    = M.fromList
-      [ (td.name, td) | p <- progs, StmtTypeDef td <- p.stmts ] 
+      [ (declaredIn p td.name, td) | p <- progs, StmtTypeDef td <- p.stmts ] 
    , typeInsts    = M.empty
    , typeQueue    = []
    , ctorFieldNames = M.fromList
-      [ (ctor.name, map fst (payloadFields ctor.payload))
+      [ (declaredIn p ctor.name, map fst (payloadFields ctor.payload))
       | p <- progs, StmtTypeDef td <- p.stmts, ctor <- td.ctors ]
    }
+
+-- | A name declared at the top level of a program.
+declaredIn :: Program Desugared -> Ident -> QualifiedIdent
+declaredIn program name = QualifiedIdent { moduleName = Just program.moduleDef.name, name = name }
 
 -- KIRA = Khast Intermediate RepresentAtion
 data Kira = Kira
@@ -49,6 +53,7 @@ data Kira = Kira
 data KirTypeDef = KirTypeDef
    { name  :: KirName
    , ctors :: [KirCtor]
+   , mods  :: [TypeModifier]
    }
    deriving Show
 
@@ -75,6 +80,13 @@ payloadFields = \case
    PTuple types   -> zip (map tupleFieldName [0 ..]) (map (.node) types)
    PRecord fields -> [(field.name, field.ty.node) | field <- fields]
 
+isTag :: KirTypeDef -> Bool
+isTag typeDef = typeDef.mods
+   |> any (\case 
+      ModTag -> True
+      _      -> False
+   )
+
 isUnitStruct :: KirTypeDef -> Bool
 isUnitStruct td = case td.ctors of
    [single] -> null single.fields
@@ -82,8 +94,7 @@ isUnitStruct td = case td.ctors of
 
 isEnum :: KirTypeDef -> Bool
 isEnum td = td.ctors
-   |> filter (\ctor -> not $ null ctor.fields)
-   |> null
+   |> all (\ctor -> null ctor.fields)
 
 isPlainStruct :: KirTypeDef -> Bool
 isPlainStruct td = case td.ctors of

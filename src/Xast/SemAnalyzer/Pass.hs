@@ -5,7 +5,7 @@ module Xast.SemAnalyzer.Pass where
 
 import Control.Monad.Except (ExceptT(..))
 import Control.Monad.State
-import Control.Monad (forM_, forM)
+import Control.Monad (forM)
 import qualified Data.Set as S
 import qualified Data.Map as M
 import Xast.AST
@@ -40,10 +40,10 @@ fullAnalysis reportWarnings saveFile programs target = do
    (_, symTable2, warnings2) <- ExceptT $ pure $ runPhase env symTable1 (importAnalysis programs)
    lift $ reportWarnings warnings2
 
-   (_, symTable3, warnings3) <- ExceptT $ pure $ runPhase env symTable2 (forM_ programs resolveTypeUsages)
+   (programsQualified, symTable3, warnings3) <- ExceptT $ pure $ runPhase env symTable2 (forM programs resolveTypeUsages)
    lift $ reportWarnings warnings3
 
-   (programsResolved, symTable4, warnings4) <- ExceptT $ pure $ runPhase env symTable3 (forM programs resolveNames)
+   (programsResolved, symTable4, warnings4) <- ExceptT $ pure $ runPhase env symTable3 (forM programsQualified resolveNames)
    lift $ reportWarnings warnings4
 
    (programsTyped, symTable5, warnings5) <- ExceptT $ pure $ runPhase env symTable4 (forM programsResolved typeCheck)
@@ -69,7 +69,7 @@ fullAnalysis reportWarnings saveFile programs target = do
 -- (`maxBound` for non-exhaustive types), used by the decision tree compiler.
 collectCtorSpans :: SymTable -> M.Map ConstructorId Int
 collectCtorSpans symTable = M.fromList
-   [ (constructorId, spanOf moduleInfo signature.owner)
+   [ (constructorId, spanOf moduleInfo signature.owner.name)
    | moduleInfo <- M.elems symTable.modules
    , symbol <- M.elems moduleInfo.symbols
    , (constructorId, signature) <- case symbol of

@@ -15,22 +15,31 @@ extern fn opNeg(a) -> a;
 -- system Clamp0To100 100   = 0;
 -- system Clamp0To100 other = other + 1;
 
+@Tag
+type Unit = Unit;
+
 type Bool = True | False;
 
-fn f () -> (Bool, Int);
-fn f = 
-    let id = .\x -> x,
-    let a = id True,
-    let b = id 12
-    in (a, b);
+fn g (Unit) -> Unit;
+fn g x = x;
 
-fn double (Int) -> Int;
-fn double x =
-    let y = True,
-    let d = x + x,
-    let d2 = d + 0
-    in d2;
+fn f (Bool) -> Bool;
+fn f x = x;
 
-fn inverse (Bool) -> Bool;
-fn inverse True = False;
-fn inverse False = True;
+--fn f () -> (Bool, Int);
+--fn f = 
+    --let id = .\x -> x,
+    --let a = id True,
+    --let b = id 12
+    --in (a, b);
+
+--fn double (Int) -> Int;
+--fn double x =
+  --  let y = True,
+   -- let d = x + x,
+    --let d2 = d + 0
+   -- in d2;
+
+--fn inverse (Bool) -> Bool;
+--fn inverse True = False;
+--fn inverse False = True;

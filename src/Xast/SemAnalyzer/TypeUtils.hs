@@ -11,6 +11,8 @@ import Xast.AST
 import Xast.Error.Types
 import Xast.SemAnalyzer.Monad
 import Xast.SemAnalyzer.Types
+import Xast.SemAnalyzer.Query (findAnyTypeModule, findTypeModule)
+import Control.Applicative ((<|>))
 import Xast.Utils.Generic (unreachableWith)
 import qualified Data.Text as T
 import Xast.SemAnalyzer.Unify (bindVar, freshTyVar, occursCheckType, resolve, substGnr, unify)
@@ -85,32 +87,51 @@ isSemError :: SemReport -> Bool
 isSemError (SemError _) = True
 isSemError _            = False
 
-literalType :: Literal -> SemAnalyzer Type
-literalType (LitString _) = pure $ TyCon (Ident "String")
-literalType (LitChar _) = pure $ TyCon (Ident "Char")
-literalType (LitInt lit) = pure $ TyCon (Ident (T.pack (show lit.kind)))
-literalType (LitFloat _) = pure $ TyCon (Ident "Float")
-literalType (LitDouble _) = pure $ TyCon (Ident "Double")
-literalType (LitTuple xs) = TyTuple <$> mapM (literalType . (.node)) xs
-literalType (LitList []) = genericList
-literalType (LitList (x:xs)) = do
-   -- Check inner list types
-   checkLitListType x xs
-   -- Type of list is defined as `List a`, 
-   -- where a is a type of the first element
-   firstElemType <- literalType x.node
-   return $ TyApp (TyCon (Ident "List")) firstElemType
+literalType :: [Located ImportDef] -> Literal -> SemAnalyzer Type
+literalType imports = \case
+   LitString _   -> builtinType imports (Ident "String")
+   LitChar _     -> builtinType imports (Ident "Char")
+   LitInt lit    -> builtinType imports (Ident (T.pack (show lit.kind)))
+   LitFloat _    -> builtinType imports (Ident "Float")
+   LitDouble _   -> builtinType imports (Ident "Double")
+   LitTuple elements -> TyTuple <$> mapM (literalType imports . (.node)) elements
+   LitList [] -> genericList imports
+   LitList (first : rest) -> do
+      -- Check inner list types
+      checkLitListType imports first rest
+      -- Type of list is defined as `List a`,
+      -- where a is a type of the first element
+      firstElemType <- literalType imports first.node
+      listType imports firstElemType
 
-checkLitListType :: Located Literal -> [Located Literal] -> SemAnalyzer ()
-checkLitListType (Located firstLoc firstElem) others =
+checkLitListType :: [Located ImportDef] -> Located Literal -> [Located Literal] -> SemAnalyzer ()
+checkLitListType imports (Located firstLoc firstElem) others =
    forM_ others $ \(Located otherLoc otherElem) -> do
-      firstType <- literalType firstElem
-      otherType <- literalType otherElem
+      firstType <- literalType imports firstElem
+      otherType <- literalType imports otherElem
       unless (firstType == otherType) $
          errSem (SEListElementTypeMismatch firstLoc firstType otherLoc otherType)
 
-genericList :: SemAnalyzer Type
-genericList = TyApp (TyCon (Ident "List")) <$> freshTyVar
+-- | @List a@ with a fresh element type.
+genericList :: [Located ImportDef] -> SemAnalyzer Type
+genericList imports = freshTyVar >>= listType imports
 
-boolType :: Type
-boolType = TyCon (Ident "Bool")
+-- | @List@ of the given element type.
+listType :: [Located ImportDef] -> Type -> SemAnalyzer Type
+listType imports elementType = do
+   listConstructor <- builtinType imports (Ident "List")
+   pure (TyApp listConstructor elementType)
+
+boolType :: [Located ImportDef] -> SemAnalyzer Type
+boolType imports = builtinType imports (Ident "Bool")
+
+-- | A type the language itself refers to, such as the type of a literal. It comes
+--   from the module visible here that declares it, otherwise from any module of
+--   the program, since such types may be used without being imported.
+builtinType :: [Located ImportDef] -> TypeName -> SemAnalyzer Type
+builtinType imports name = do
+   visibleModule <- findTypeModule imports name
+   anyModule <- findAnyTypeModule name
+   pure $ case visibleModule <|> anyModule of
+      Just module' -> typeIn module' name
+      Nothing      -> unresolvedType name

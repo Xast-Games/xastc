@@ -64,7 +64,7 @@ typeTests :: Test
 typeTests = TestList
    [ TestCase $
       assertParses type' "Int"
-      (TyCon (Ident "Int"))
+      (unresolvedType (Ident "Int"))
 
    , TestCase $
       assertParses type' "a"
@@ -73,8 +73,8 @@ typeTests = TestList
    , TestCase $
       assertParses type' "List Int"
       ( TyApp
-         (TyCon (Ident "List"))
-         (TyCon (Ident "Int"))
+         (unresolvedType (Ident "List"))
+         (unresolvedType (Ident "Int"))
       )
 
    , TestCase $
@@ -83,23 +83,23 @@ typeTests = TestList
 
    , TestCase $
       assertParses type' "(Int)"
-      (TyCon (Ident "Int"))
+      (unresolvedType (Ident "Int"))
 
    , TestCase $
       assertParses type' "(Int, Bool)"
       ( TyTuple
-         [ TyCon (Ident "Int")
-         , TyCon (Ident "Bool")
+         [ unresolvedType (Ident "Int")
+         , unresolvedType (Ident "Bool")
          ]
       )
 
    , TestCase $
       assertParses type' "fn(Int, Bool) -> String"
       ( TyFn
-         [ TyCon (Ident "Int")
-         , TyCon (Ident "Bool")
+         [ unresolvedType (Ident "Int")
+         , unresolvedType (Ident "Bool")
          ]
-         (TyCon (Ident "String"))
+         (unresolvedType (Ident "String"))
       )
 
    , TestCase $
@@ -843,10 +843,10 @@ functionTests = TestLabel "Functions" $ TestList
                   testLocation
                   []
                   (Ident "add")
-                  [ (loc $ TyCon $ Ident "Int")
-                  , (loc $ TyCon $ Ident "Int")
+                  [ (loc $ unresolvedType $ Ident "Int")
+                  , (loc $ unresolvedType $ Ident "Int")
                   ]
-                  (loc $ TyCon $ Ident "Int"))
+                  (loc $ unresolvedType $ Ident "Int"))
 
    , TestCase $
       assertParsesIgnoringLocations withTestLocationFunc func
@@ -868,7 +868,7 @@ functionTests = TestLabel "Functions" $ TestList
                   []
                   (Ident "makePoint")
                   []
-                  (loc $ TyCon $ Ident "Point"))
+                  (loc $ unresolvedType $ Ident "Point"))
 
    -- Function implementations
    , TestCase $
@@ -1010,10 +1010,10 @@ typeDefTests = TestLabel "Type definitions" $ TestList
                         (PRecord
                            [ Field
                               (Ident "x")
-                              (loc $ TyCon $ Ident "Int")
+                              (loc $ unresolvedType $ Ident "Int")
                            , Field
                               (Ident "y")
-                              (loc $ TyCon $ Ident "Int")
+                              (loc $ unresolvedType $ Ident "Int")
                            ])
                ])
 
@@ -1030,13 +1030,13 @@ typeDefTests = TestLabel "Type definitions" $ TestList
                         testLocation
                         (Ident "Circle")
                         (PTuple
-                           [(loc $ TyCon $ Ident "Float")])
+                           [(loc $ unresolvedType $ Ident "Float")])
                , Ctor
                         testLocation
                         (Ident "Rectangle")
                         (PTuple
-                           [ (loc $ TyCon $ Ident "Float")
-                           , (loc $ TyCon $ Ident "Float")
+                           [ (loc $ unresolvedType $ Ident "Float")
+                           , (loc $ unresolvedType $ Ident "Float")
                            ])
                ])
 
@@ -1077,8 +1077,8 @@ externTests = TestLabel "Extern" $ TestList
                   testLocation
                   []
                   (Ident "puts")
-                  [(loc $ TyCon $ Ident "String")]
-                  (loc $ TyCon $ Ident "Int"))
+                  [(loc $ unresolvedType $ Ident "String")]
+                  (loc $ unresolvedType $ Ident "Int"))
 
    , TestCase $
       assertParsesIgnoringLocations withTestLocationExtern extern
@@ -1088,8 +1088,8 @@ externTests = TestLabel "Extern" $ TestList
                   testLocation
                   []
                   (Ident "malloc")
-                  [(loc $ TyCon $ Ident "Int")]
-                  (loc $ TyCon $ Ident "Ptr"))
+                  [(loc $ unresolvedType $ Ident "Int")]
+                  (loc $ unresolvedType $ Ident "Ptr"))
 
    , TestCase $
         assertParsesIgnoringLocations withTestLocationExtern extern
@@ -1100,7 +1100,7 @@ externTests = TestLabel "Extern" $ TestList
                     []
                     (Ident "panic")
                     []
-                  (loc $ TyCon $ Ident "Never"))
+                  (loc $ unresolvedType $ Ident "Never"))
 
    -- Extern types
    , TestCase $
@@ -1257,7 +1257,7 @@ systemTests = TestLabel "Systems" $ TestList
                   []
                   (Ident "Move")
                   [QueriedEntity
-                     [(loc $ TyCon $ Ident "Position")]]
+                     [(loc $ unresolvedType $ Ident "Position")]]
                   (loc $ TyTuple [])
                   Nothing)
 
@@ -1270,8 +1270,8 @@ systemTests = TestLabel "Systems" $ TestList
                   []
                   (Ident "Move")
                   [QueriedEntity
-                     [ (loc $ TyCon $ Ident "Position")
-                     , (loc $ TyCon $ Ident "Velocity")
+                     [ (loc $ unresolvedType $ Ident "Position")
+                     , (loc $ unresolvedType $ Ident "Velocity")
                      ]]
                   (loc $ TyTuple [])
                   Nothing)
@@ -1287,7 +1287,7 @@ systemTests = TestLabel "Systems" $ TestList
                   []
                   (loc $ TyTuple [])
                   (Just
-                     [WithEvent $ (loc $ TyCon $ Ident "Damage")]))
+                     [WithEvent $ (loc $ unresolvedType $ Ident "Damage")]))
 
    , TestCase $
       assertParsesIgnoringLocations withTestLocationSystem system
@@ -1300,7 +1300,7 @@ systemTests = TestLabel "Systems" $ TestList
                   []
                   (loc $ TyTuple [])
                   (Just
-                     [WithRes $ (loc $ TyCon $ Ident "Time")]))
+                     [WithRes $ (loc $ unresolvedType $ Ident "Time")]))
 
    , TestCase $
       assertParsesIgnoringLocations withTestLocationSystem system
@@ -1382,7 +1382,7 @@ programTests = TestLabel "Programs" $ TestList
                            []
                            (Ident "main")
                            []
-                           (loc $ TyCon $ Ident "Int")
+                           (loc $ unresolvedType $ Ident "Int")
             ]
             src)
 

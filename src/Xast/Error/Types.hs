@@ -29,6 +29,8 @@ data SemError
    | SEExternTypeRedeclaration Ident Location Location
    | SESystemRedeclaration Ident Location Location
    | SECtorRedeclaration Ident Location Location
+   -- Modifier error
+   | SEInvalidTagType Location TypeName
    -- Shadowing error
    | SEDuplicateBinding Ident Location Location
    | SEShadowedBinding Ident Location Location

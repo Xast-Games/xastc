@@ -8,6 +8,8 @@ import Control.Monad.Reader (MonadReader(local), asks)
 import qualified Data.Map as M
 import Control.Monad.State (gets)
 import qualified Data.Set as S
+import Data.List (find)
+import Xast.Utils.Generic ((|>))
 
 lookupLocal :: Ident -> SemAnalyzer (Maybe VarInfo)
 lookupLocal ident = asks (M.lookup ident . (.vars))
@@ -123,6 +125,43 @@ lookupUnqualifiedTypeName :: [Located ImportDef] -> Ident -> SemAnalyzer (Maybe 
 lookupUnqualifiedTypeName imports ident = do
    symbol <- lookupUnqualifiedSymbol imports ident
    pure (symbol >>= \candidate -> if isTypeSymbol candidate then Just candidate else Nothing)
+
+-- | The module that declares the type visible under this name: the current
+--   module first, then the unqualified imports.
+findTypeModule :: [Located ImportDef] -> TypeName -> SemAnalyzer (Maybe Module)
+findTypeModule imports name = do
+   currentModule <- gets (.currentModule)
+   modules <- gets (.modules)
+   let importedModules = imports
+         |> map (.node)
+         |> filter (\importDef -> importBringsIn modules importDef name)
+         |> map (.importModule)
+   let candidates = currentModule : importedModules
+   pure (find (\module' -> declaresType modules module' name) candidates)
+
+-- | Any module that declares a type with this name. Used for builtin types such
+--   as the type of an integer literal, which may be used without being imported.
+findAnyTypeModule :: TypeName -> SemAnalyzer (Maybe Module)
+findAnyTypeModule name = do
+   modules <- gets (.modules)
+   pure $ M.keys modules
+      |> find (\module' -> declaresType modules module' name)
+
+-- | Whether an unqualified import makes this name visible without a module alias.
+importBringsIn :: M.Map Module ModuleInfo -> ImportDef -> Ident -> Bool
+importBringsIn modules importDef ident = case importDef.payload of
+   ImpAlias _ -> False
+   ImpSelect identifiers -> identifiers
+      |> any (\identifier -> identifier.node == ident)
+   ImpFull -> case M.lookup importDef.importModule modules of
+      Just moduleInfo -> S.member ident moduleInfo.exports
+      Nothing         -> False
+
+-- | Whether the module declares a type (or an extern type) with this name.
+declaresType :: M.Map Module ModuleInfo -> Module -> TypeName -> Bool
+declaresType modules module' name =
+   let symbol = M.lookup module' modules >>= \moduleInfo -> M.lookup name moduleInfo.symbols
+   in maybe False isTypeSymbol symbol
 
 lookupCurrentFunction :: Ident -> SemAnalyzer (Maybe FuncSig)
 lookupCurrentFunction ident = do

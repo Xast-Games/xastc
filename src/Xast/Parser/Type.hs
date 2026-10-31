@@ -57,7 +57,7 @@ atomType = choice
       <*> between (symbol "(") (symbol ")") (type' `sepBy` symbol ",")
       <* symbol "->"
       <*> type'
-   , TyCon <$> typeIdent
+   , unresolvedType <$> typeIdent
    , TyInt <$> try typeIntrinsic
    , TyGnr <$> genericIdent
    ]

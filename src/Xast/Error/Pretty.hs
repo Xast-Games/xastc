@@ -295,6 +295,16 @@ instance PrintError SemError where
    printError (SETypeRedeclaration ident oldLoc newLoc) =
       redeclarationError "Type" ident oldLoc newLoc
 
+   printError (SEInvalidTagType loc typeName) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ("Type " <> show (blue (show typeName)) <> " cannot be a @Tag")
+            [ (toPosition pos len filename, This "Tag type must be a plain marker") ]
+            [ Hint ("A tag has no type parameters and a single constructor without fields, e.g. `@Tag type " <> show typeName <> " = " <> show typeName <> ";`") ]
+
+      in printReportAt filename report
+
    printError (SEFnRedeclaration ident oldLoc newLoc) =
       redeclarationError "Function" ident oldLoc newLoc
 

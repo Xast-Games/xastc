@@ -14,6 +14,8 @@ import Xast.Parser.Program (parseProgram)
 import Xast.SemAnalyzer.Pass (fullAnalysis)
 import Xast.SemAnalyzer.Types (AnalysisResult)
 import Xast.Utils.Compiler (Target (Target64))
+import Data.Maybe (isJust, fromJust)
+import Xast.Utils.Generic ((|>))
 
 tests :: Test
 tests = TestList
@@ -94,6 +96,18 @@ declarationTests = TestList
 
    , named "signature without an implementation" $ assertRejected isMissingFnImpls $ inModule
       [ "fn g () -> Int;" ]
+
+   , named "plain tag type" $ assertAnalyzes $ inModule
+      [ "@Tag type Marker = Marker;" ]
+
+   , named "tag type with type parameters" $ assertRejected isInvalidTagType $ inModule
+      [ "@Tag type Marker a = Marker;" ]
+
+   , named "tag type with constructor fields" $ assertRejected isInvalidTagType $ inModule
+      [ "@Tag type Marker = Marker Int;" ]
+
+   , named "tag type with several constructors" $ assertRejected isInvalidTagType $ inModule
+      [ "@Tag type Marker = A | B;" ]
    ]
 
 importTests :: Test
@@ -131,6 +145,29 @@ importTests = TestList
          , "use A as M"
          , "fn f (Int) -> Int;"
          , "fn f x = M.inc x;"
+         ]
+      ]
+
+   , named "type of the same name from another module is not mixed up" $ assertAnalyzes
+      [ moduleWithBox "A"
+      , moduleWithBox "B"
+      , moduleSource
+         [ "module C exports *"
+         , "use B { Box, openBox }"
+         , "fn f (Box) -> Box;"
+         , "fn f b = openBox b;"
+         ]
+      ]
+
+   , named "types of the same name from two modules are different types" $ assertRejected isTypeError
+      [ moduleWithBox "A"
+      , moduleWithBox "B"
+      , moduleSource
+         [ "module C exports *"
+         , "use A { Box }"
+         , "use B { openBox }"
+         , "fn f (Box) -> Box;"
+         , "fn f b = openBox b;"
          ]
       ]
 
@@ -455,6 +492,15 @@ moduleWithInc moduleName = moduleSource
    , "fn inc x = x;"
    ]
 
+-- | A module that declares its own type `Box` and a function `openBox` on it.
+moduleWithBox :: Text -> Text
+moduleWithBox moduleName = moduleSource
+   [ "module " <> moduleName <> " exports *"
+   , "type Box = Box;"
+   , "fn openBox (Box) -> Box;"
+   , "fn openBox b = b;"
+   ]
+
 -- Error kinds ---------------------------------------------------------------
 
 isSelfImport, isCyclicImport, isMissingModule, isMissingImports, isPrivateImports :: SemError -> Bool
@@ -475,6 +521,9 @@ isTypeRedeclaration = \case { SETypeRedeclaration {} -> True; _ -> False }
 isFnRedeclaration = \case { SEFnRedeclaration {} -> True; _ -> False }
 isExternFnRedeclaration = \case { SEExternFnRedeclaration {} -> True; _ -> False }
 isExternTypeRedeclaration = \case { SEExternTypeRedeclaration {} -> True; _ -> False }
+
+isInvalidTagType :: SemError -> Bool
+isInvalidTagType = \case { SEInvalidTagType {} -> True; _ -> False }
 
 isSystemRedeclaration, isCtorRedeclaration, isDuplicateBinding, isShadowedBinding :: SemError -> Bool
 isSystemRedeclaration = \case { SESystemRedeclaration {} -> True; _ -> False }

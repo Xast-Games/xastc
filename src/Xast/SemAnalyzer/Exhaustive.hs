@@ -11,9 +11,9 @@ import Xast.SemAnalyzer.Monad
 import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Query
 
-typeHead :: Type -> Maybe Ident
+typeHead :: Type -> Maybe QualifiedIdent
 typeHead = \case
-   TyCon name   -> Just name
+   TyCon qualified -> Just qualified
    TyApp func _ -> typeHead func
    _            -> Nothing
 
@@ -23,25 +23,33 @@ patOf (MatchWing pat _) = pat
 checkMatchExhaustive :: Location -> Type -> [Pattern Typed] -> SemAnalyzer Bool
 checkMatchExhaustive location scrutineeType patterns = case typeHead scrutineeType of
    Nothing -> pure False
-   Just typeName -> do
-      maybeSymbol <- lookupCurrentModule typeName
+   Just qualified -> do
+      let typeName = qualified.name
+      maybeSymbol <- lookupDeclaringModule qualified
       case maybeSymbol of
          Just (SymbolType _ typeSig) | not typeSig.nonExhaustive ->
-            if any isCatchAll patterns
-               then pure True
+            if any isCatchAll patterns then 
+               return True
+            else do
+               let covered = S.fromList [ctorIdent | PatCon _ ctorIdent _ <- patterns]
+               let missing = S.toList (typeSig.ctors S.\\ covered)
+               if null missing then 
+                  return True
                else do
-                  let covered = S.fromList [ctorIdent | PatCon _ ctorIdent _ <- patterns]
-                  let missing = S.toList (typeSig.ctors S.\\ covered)
-                  if null missing
-                     then pure True
-                     else do
-                        errSem (SENonExhaustiveMatch location typeName missing)
-                        pure False
-         _ -> pure False
+                  errSem (SENonExhaustiveMatch location typeName missing)
+                  return False
+         _ -> return False
    where
       isCatchAll (PatVar _ _)    = True
       isCatchAll (PatWildcard _) = True
       isCatchAll _               = False
+
+-- | Looks a name up in the module that declares it, or in the current module
+--   when that is not known.
+lookupDeclaringModule :: QualifiedIdent -> SemAnalyzer (Maybe SymbolInfo)
+lookupDeclaringModule qualified = case qualified.moduleName of
+   Just module' -> lookupInModule module' qualified.name
+   Nothing      -> lookupCurrentModule qualified.name
 
 checkClausesExhaustive :: Location -> [Type] -> [[Pattern Typed]] -> SemAnalyzer Bool
 checkClausesExhaustive location parameterTypes clauseArgs = do

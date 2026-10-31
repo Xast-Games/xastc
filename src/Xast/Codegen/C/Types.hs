@@ -1,6 +1,9 @@
 module Xast.Codegen.C.Types where
 
 import Data.Text (Text)
+import Xast.Lowerer.Types (KirName)
+
+type EcsTag = KirName
 
 data CProgram = CProgram
    { path :: FilePath
@@ -9,15 +12,12 @@ data CProgram = CProgram
    deriving Show
 
 data CDecl 
-   = CUnitDef CUnitDefinition
+   = CTagDef EcsTag
    | CStructDef CStructDefinition
    | CTaggedUnionDef CTaggedUnionDefinition
    | CEnumDef CEnumDefinition
    | CFunc CFunction
    | CGlob CGlobal
-   deriving Show
-
-data CUnitDefinition
    deriving Show
 
 data CTaggedUnionDefinition = CTaggedUnionDefinition

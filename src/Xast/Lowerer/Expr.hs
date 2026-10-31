@@ -46,7 +46,9 @@ lowerExpr env expr = case expr of
       (bodyInstrs, bodyVal) <- lowerExpr env' letIn.bindExpr
       pure (bindInstrs ++ bodyInstrs, bodyVal)
 
-   _ -> todo__ "this expression form is not supported by the lowerer yet"
+   unsupportedExpr -> todo__ $ 
+      "this expression form is not supported by the lowerer yet:\n" ++
+      show unsupportedExpr
 
 lowerLetBindings
    :: M.Map LocalId KirValue

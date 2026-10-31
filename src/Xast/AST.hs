@@ -560,7 +560,7 @@ data Field = Field      -- fieldOne : Int
 
 data Type
    = TyGnr GenericName        -- a, b, c...
-   | TyCon TypeName        -- Bool, Int, String
+   | TyCon QualifiedIdent  -- Bool, Int, String
    | TyApp Type Type    -- Maybe a, Either a Int...
    | TyTuple [Type]     -- (Bool, a, Maybe String)
    | TyFn [Type] Type   -- fn(Type1, Type2 ... TypeN) -> TypeRet
@@ -569,6 +569,21 @@ data Type
    | TyInvalid          -- <invalid>
    deriving (Eq, Ord, Show)
 
+-- | A name together with the module that declares it.
+data QualifiedIdent = QualifiedIdent
+   { moduleName :: Maybe Module  -- ^ Nothing until the name is resolved
+   , name       :: Ident
+   }
+   deriving (Eq, Ord, Show)
+
+-- | A named type as written in the source, before its module is known.
+unresolvedType :: TypeName -> Type
+unresolvedType name = TyCon QualifiedIdent { moduleName = Nothing, name = name }
+
+-- | A named type declared in the given module.
+typeIn :: Module -> TypeName -> Type
+typeIn module' name = TyCon QualifiedIdent { moduleName = Just module', name = name }
+
 data TyIntrinsic
    = TyNumber
    | TyConcat
@@ -576,7 +591,7 @@ data TyIntrinsic
 
 typename :: Type -> String
 typename (TyGnr ident) = show ident
-typename (TyCon ident) = show ident
+typename (TyCon qualified) = show qualified.name
 typename (TyTuple xs) = "(" ++ intercalate ", " (map typename xs) ++ ")"
 typename (TyFn args ret) = "fn(" ++ intercalate ", " (map typename args) ++ ") -> " ++ typename ret 
 typename (TyApp applicant operand) =

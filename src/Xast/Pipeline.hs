@@ -22,7 +22,7 @@ import Xast.Utils.Pretty
 import qualified Toml
 import Control.Monad.RWS (MonadTrans(lift))
 import Xast.Lowerer.Pass (lowerPrograms)
-import Xast.Lowerer.EraseZero (eraseZeroSized)
+import Xast.Lowerer.EraseZero (eraseZeroSized, EraseResult (EraseResult))
 import Xast.Codegen.C.Pretty (debugPrograms, prettyProgram)
 import Xast.Codegen.C.Pass (codegen)
 import Xast.Utils.Compiler (Target(Target64))
@@ -94,10 +94,10 @@ runCompile_ dir = runExceptT $ do
    let (loweredIR, typeDefs) = lowerPrograms ctorSpans progsAnalyzed
 
    -- Erasing zero-sized types: they have no representation in C
-   let (erasedIR, erasedTypeDefs) = eraseZeroSized loweredIR typeDefs
+   let EraseResult erasedIR erasedTypeDefs ecsTags = eraseZeroSized loweredIR typeDefs
 
    -- Generating C
-   let generatedC = codegen erasedIR erasedTypeDefs
+   let generatedC = codegen erasedIR erasedTypeDefs ecsTags
 
    -- Temporarily print C programs as debug
    ----------------------------------------
