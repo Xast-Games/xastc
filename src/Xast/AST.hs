@@ -7,20 +7,6 @@ import GHC.Generics (Generic)
 import Data.Text (Text, unpack, pack)
 import Text.Megaparsec (SourcePos)
 
-allowedIntrinsics :: [Ident]
-allowedIntrinsics =
-   -- Basic operations
-   [ Ident "opAdd",        Ident "opSub",          Ident "opMul"
-   , Ident "opDiv",        Ident "opMod",          Ident "opPow"
-   , Ident "opEq",         Ident "opNeq",          Ident "opLt"
-   , Ident "opGt",         Ident "opLe",           Ident "opGe"
-   , Ident "opAnd",        Ident "opOr",           Ident "opNot"
-   , Ident "opPipe",       Ident "opApply",        Ident "opConcat"
-   , Ident "opNeg",        Ident "opBitwiseAnd",   Ident "opBitwiseOr"
-   , Ident "opBitwiseXor", Ident "opShiftLeft",    Ident "opShiftRight"
-   -- 
-   ]
-
 data Located a = Located
    { location :: Location
    , node     :: a
@@ -167,7 +153,7 @@ newtype FunctionId = FunctionId { inner :: Int }
 newtype ConstructorId = ConstructorId { inner :: Int }
    deriving (Eq, Ord, Show)
 newtype ExternId = ExternId { inner :: Int }
-   deriving (Eq, Show)
+   deriving (Eq, Ord, Show)
 
 data Resolution
    = ResLocal LocalId
@@ -589,6 +575,31 @@ data TyIntrinsic
    | TyConcat
    deriving (Eq, Ord, Show)
 
+-- | An extern function marked @Intrinsic: the compiler defines it itself,
+--   once for each set of types it is used at.
+data IntrinsicDecl = IntrinsicDecl
+   { name    :: QualifiedIdent  -- ^ e.g. @Std.Ops.opAdd@
+   , args    :: [Type]          -- ^ as declared, e.g. @(number, number)@
+   , retType :: Type
+   }
+   deriving (Eq, Show)
+
+-- | Named types a @number@ may stand for: the numeric types of @Std.Num@ and
+--   the floating-point types of literals.
+numberTypeNames :: [TypeName]
+numberTypeNames = map Ident
+   [ "Size", "USize", "Long", "ULong", "Int", "UInt"
+   , "Short", "UShort", "Byte", "UByte", "Float", "Double"
+   ]
+
+-- | The type of text, which a @concatenative@ may stand for.
+stringTypeName :: TypeName
+stringTypeName = Ident "String"
+
+-- | The type of lists, which a @concatenative@ may stand for with any element type.
+listTypeName :: TypeName
+listTypeName = Ident "List"
+
 typename :: Type -> String
 typename (TyGnr ident) = show ident
 typename (TyCon qualified) = show qualified.name
@@ -599,7 +610,7 @@ typename (TyApp applicant operand) =
    in unwords (typename headTy : map typenameArg args)
 typename (TyVar n) = "t" ++ show (n `mod` 10)
 typename (TyInt TyNumber) = "number"
-typename (TyInt TyConcat) = "concat"
+typename (TyInt TyConcat) = "concatenative"
 typename TyInvalid = "<invalid>"
 
 tyAppSpine :: Type -> Type -> (Type, [Type])

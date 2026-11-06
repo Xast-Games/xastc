@@ -67,6 +67,7 @@ library
         Xast.Codegen.C.Monad,
         Xast.Codegen.C.Types,
         Xast.Codegen.C.Pass,
+        Xast.Codegen.C.Intrinsics,
         Xast.Codegen.C.Pretty,
 
         Xast.Utils.Compiler,

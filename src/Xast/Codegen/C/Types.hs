@@ -40,11 +40,17 @@ data CEnumDefinition = CEnumDefinition
    deriving Show
 
 data CFunction = CFunction
-   { ty   :: CType
-   , name :: Text
-   , args :: [CFuncArg]
-   , body :: [CStmt]
+   { linkage :: CLinkage
+   , ty      :: CType
+   , name    :: Text
+   , args    :: [CFuncArg]
+   , body    :: [CStmt]
    }
+   deriving Show
+
+data CLinkage
+   = CExternal      -- visible to other translation units
+   | CStaticInline  -- static inline, for a function defined in a header
    deriving Show
 
 data CFuncArg = CFuncArg
@@ -99,6 +105,11 @@ data CExpr
       { target :: CExpr
       , value  :: CExpr
       }
+   | CConditional  -- condition ? whenTrue : whenFalse
+      { condition :: CExpr
+      , whenTrue  :: CExpr
+      , whenFalse :: CExpr
+      }
    deriving Show
 
 data CArg
@@ -107,9 +118,10 @@ data CArg
    deriving Show
 
 data CBinOp
-   = Add | Sub | Mul | Div
+   = Add | Sub | Mul | Div | Mod
    | Eq | Ne | Lt | Le | Gt | Ge
    | And | Or
+   | BitAnd | BitOr | BitXor | Shl | Shr
    deriving Show
 
 data CUnOp

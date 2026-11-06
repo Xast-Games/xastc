@@ -17,14 +17,17 @@ import Xast.Lowerer.Types
 import Xast.Codegen.C.Types
 import Xast.Codegen.C.Monad (CCodegen, runCodegen, CCodegenEnv (..))
 import qualified Xast.Utils.List as L
+import qualified Data.Map as M
+import Xast.Codegen.C.Intrinsics (IntrinsicDefinition (..), IntrinsicSite (..), intrinsicDefinitions)
 
 codegen 
    :: [Kira] 
    -> [KirTypeDef]
    -> [EcsTag]
+   -> [KirIntrinsicDef]
    -> [CProgram]
-codegen kira typeDefs ecsTags = 
-   let env = CCodegenEnv typeDefs ecsTags
+codegen kira typeDefs ecsTags intrinsicDefs = 
+   let env = CCodegenEnv typeDefs ecsTags intrinsicDefs
        generated = do
          types    <- codegenTypeDefs
          programs <- forM kira codegenOne
@@ -45,9 +48,13 @@ codegenTypeDefs = do
             | isEnum td        -> codegenEnum td
             | otherwise        -> codegenADT td
 
+   -- Intrinsics come after the types, as comparisons return a Bool. Every
+   -- module includes this header, so they are static inline.
+   let intrinsicFunctions = env.intrinsics |> map (CFunc . codegenIntrinsic)
+
    return CProgram 
       { path = typeDefsFilename
-      , declarations = tagDeclarations ++ typeDeclarations
+      , declarations = tagDeclarations ++ typeDeclarations ++ intrinsicFunctions
       } 
 
 codegenStruct :: KirTypeDef -> [CDecl]
@@ -126,6 +133,7 @@ codegenOne kira = do
 
 codegenFn :: KirFunction -> CCodegen CFunction
 codegenFn func = do
+   let linkage = CExternal
    let ty = typeToCType func.retTy
    let KirName name = func.name
    let args = [CFuncArg { ty = typeToCType param.ty, name = paramName } | param <- func.params, let KirName paramName = param.name]
@@ -136,6 +144,7 @@ codegenFn func = do
 
 codegenSystem :: KirSystem -> CCodegen CFunction
 codegenSystem system = do
+   let linkage = CExternal
    let ty = CVoid
    let KirName name = system.name
    let args = [CFuncArg
@@ -211,6 +220,36 @@ codegenInstruct = \case
       todo__ "payload field access needs an ADT layout in the C backend"
    KirMatch { ty = matchType, scrutinee = scrutinee, arms = arms, fallback = fallback, dest = dest, exhaustive = exhaustive } ->
       codegenMatch matchType scrutinee arms fallback dest exhaustive
+
+-- | The C function of one instance of an intrinsic, e.g.
+--   @static inline int32_t Std_Ops_opAdd_Std_Num_Int(int32_t _a0, int32_t _a1) { return _a0 + _a1; }@,
+--   whose body comes from 'intrinsicDefinitions'.
+codegenIntrinsic :: KirIntrinsicDef -> CFunction
+codegenIntrinsic instance' =
+   let paramNames = zipWith (\index _ -> intrinsicParamName index) [0 ..] instance'.params
+       args = L.forEach (zip instance'.params paramNames) $ \(paramType, paramName) ->
+         CFuncArg { ty = typeToCType paramType, name = paramName }
+       operandType = case instance'.params of
+         first : _ -> first
+         []        -> instance'.retTy
+       site = IntrinsicSite
+         { params      = map CVar paramNames
+         , operandType = operandType
+         , resultType  = instance'.retTy
+         }
+       definition = case M.lookup instance'.intrinsic intrinsicDefinitions of
+         Just known -> known
+         Nothing    -> unreachableWith ("the semantic analyzer let through unknown intrinsic " ++ show instance'.intrinsic)
+   in CFunction
+      { linkage = CStaticInline
+      , ty      = typeToCType instance'.retTy
+      , name    = instance'.name.text
+      , args    = args
+      , body    = definition.body site
+      }
+
+intrinsicParamName :: Int -> Text
+intrinsicParamName index = "_a" <> T.pack (show index)
 
 codegenMatch
    :: Type
@@ -295,6 +334,7 @@ tagToExpr (TagCtor ctor) = CVar ctor.inner
 literalToExpr :: Literal -> CExpr
 literalToExpr (LitInt int)     = CIntLit int.value
 literalToExpr (LitFloat float) = CFloatLit (realToFrac float)
+literalToExpr (LitDouble double) = CFloatLit double
 literalToExpr lit              = todo__ ("no C representation for literal " ++ show lit)
 
 typeToCType :: Type -> CType
@@ -307,7 +347,16 @@ typeToCType = \case
 --   arrive monomorphized, already named with their module prefix.
 namedCType :: Text -> CType
 namedCType = \case
-   "Int"   -> CInt
-   "Float" -> CFloat
-   "Long"  -> CLong
-   name    -> CStruct name
+   "Size"   -> CSize
+   "USize"  -> CUSize
+   "Long"   -> CLong
+   "ULong"  -> CULong
+   "Int"    -> CInt
+   "UInt"   -> CUInt
+   "Short"  -> CShort
+   "UShort" -> CUShort
+   "Byte"   -> CByte
+   "UByte"  -> CUByte
+   "Float"  -> CFloat
+   "Double" -> CDouble
+   name     -> CStruct name

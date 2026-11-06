@@ -227,6 +227,28 @@ instance PrintError ModifierError where
 
       in printReportAt filename report
 
+   printError (SEUnknownIntrinsic loc name) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ("Function " <> show (blue (show name)) <> " is not an intrinsic of the compiler")
+            [ (toPosition pos len filename, This "Marked @Intrinsic here") ]
+            [ Hint "Only functions the compiler defines itself can be @Intrinsic; otherwise declare it as a plain extern function" ]
+
+      in printReportAt filename report
+
+   printError (SEIntrinsicArityMismatch loc name expected actual) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ( "Intrinsic " <> show (blue (show name)) <> " takes " <> show expected
+               <> " parameter(s), but is declared with " <> show actual
+            )
+            [ (toPosition pos len filename, This "Declared with the wrong number of parameters") ]
+            []
+
+      in printReportAt filename report
+
 instance PrintError ShadowingError where
    printError :: ShadowingError -> IO ()
    printError (SEDuplicateBinding ident oldLoc newLoc) =
@@ -404,6 +426,30 @@ instance PrintError TypeCheckError where
             ( "Cannot construct infinite type: t" <> show tyVar <> " ~ " <> typename ty )
             [(toPosition pos len filename, This "Infinite type detected here")]
             [Hint "Check for a self-referencing definition"]
+
+      in printReportAt filename report
+
+   printError (SEUnsatisfiedConstraint loc constraint origin actual) =
+      let Location pos _ len = loc
+          Location originPos _ originLen = origin
+          filename = sourceName pos
+          valueMarker = (toPosition pos len filename, This ("This has type `" <> typename actual <> "`"))
+          originMarker = (toPosition originPos originLen filename, Where ("`" <> typename (TyInt constraint) <> "` is required here"))
+          markers = if origin == loc then [valueMarker] else [valueMarker, originMarker]
+          report = errReport
+            ("Type `" <> show (red (typename actual)) <> "` is not " <> constraintDescription constraint)
+            markers
+            [Note (constraintTypesNote constraint)]
+
+      in printReportAt filename report
+
+   printError (SEAmbiguousConstraint loc constraint) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ("Cannot tell which " <> typename (TyInt constraint) <> " type is meant here")
+            [(toPosition pos len filename, This "The type of this expression is never fixed")]
+            [Hint "Use the value with a concrete type, e.g. pass it to a function taking `Int`"]
 
       in printReportAt filename report
 
@@ -601,6 +647,23 @@ printWarning (SWDeadCode ident) =
 
 highlightModule :: Module -> String
 highlightModule = show . blue . show
+
+-- | What a type must be to satisfy the constraint, as the end of a sentence.
+constraintDescription :: TyIntrinsic -> String
+constraintDescription TyNumber = "a number type"
+constraintDescription TyConcat = "a concatenative type"
+
+-- | The types that satisfy the constraint.
+constraintTypesNote :: TyIntrinsic -> String
+constraintTypesNote TyNumber =
+   let names = map quotedName numberTypeNames
+   in "Number types are " <> intercalate ", " names
+constraintTypesNote TyConcat =
+   "Concatenative types are " <> quotedName stringTypeName <> " and " <> quotedName listTypeName
+
+-- | A name as it is written in messages, e.g. @`Int`@.
+quotedName :: Ident -> String
+quotedName name = "`" <> show name <> "`"
 
 errReport :: String -> [(Position, Marker String)] -> [Note String] -> Report String
 errReport = Err Nothing

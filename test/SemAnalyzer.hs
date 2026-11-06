@@ -22,6 +22,8 @@ tests = TestList
    , TestLabel "Imports"              importTests
    , TestLabel "Name resolution"      nameResolutionTests
    , TestLabel "Type checking"        typeCheckingTests
+   , TestLabel "Intrinsic constraints" constraintTests
+   , TestLabel "Intrinsic declarations" intrinsicDeclarationTests
    , TestLabel "Match exhaustiveness" exhaustivenessTests
    , TestLabel "Systems"              systemTests
    ]
@@ -462,6 +464,115 @@ assertRejected isExpected sources = analyze sources >>= \case
 named :: String -> Assertion -> Test
 named label assertion = TestLabel label (TestCase assertion)
 
+constraintTests :: Test
+constraintTests = TestList
+   [ named "number operator on an Int" $ assertAnalyzes $ inIntrinsicModule
+      [ "fn f (Int) -> Int;"
+      , "fn f x = x + 1;"
+      ]
+
+   , named "number operator on a Double" $ assertAnalyzes $ inIntrinsicModule
+      [ "fn f (Double) -> Double;"
+      , "fn f x = x + 1.0;"
+      ]
+
+   , named "number comparison" $ assertAnalyzes $ inIntrinsicModule
+      [ "fn f (Long) -> Bool;"
+      , "fn f x = x == x;"
+      ]
+
+   , named "let bound lambda on numbers" $ assertAnalyzes $ inIntrinsicModule
+      [ "fn f () -> Int;"
+      , "fn f = let double = .\\x -> x + x in double 1;"
+      ]
+
+   , named "number in the signature of a function" $ assertAnalyzes $ inIntrinsicModule
+      [ "fn twice (number) -> number;"
+      , "fn twice x = x + x;"
+      , "fn g () -> Int;"
+      , "fn g = twice 2;"
+      ]
+
+   , named "concatenating strings" $ assertAnalyzes $ inIntrinsicModule
+      [ "fn f (String) -> String;"
+      , "fn f s = s <> s;"
+      ]
+
+   , named "concatenating lists" $ assertAnalyzes $ inIntrinsicModule
+      [ "fn f (List Int) -> List Int;"
+      , "fn f xs = xs <> [1];"
+      ]
+
+   , named "number operator on a Bool" $ assertRejected isUnsatisfiedConstraint $ inIntrinsicModule
+      [ "fn f (Bool) -> Bool;"
+      , "fn f b = b + b;"
+      ]
+
+   , named "number operator on a generic" $ assertRejected isUnsatisfiedConstraint $ inIntrinsicModule
+      [ "fn f (a) -> a;"
+      , "fn f x = x + x;"
+      ]
+
+   , named "concatenating numbers" $ assertRejected isUnsatisfiedConstraint $ inIntrinsicModule
+      [ "fn f (Int) -> Int;"
+      , "fn f x = x <> x;"
+      ]
+
+   , named "number lambda checked against a function on Bool" $ assertRejected isUnsatisfiedConstraint $ inIntrinsicModule
+      [ "fn f () -> fn(Bool) -> Bool;"
+      , "fn f = .\\x -> x + x;"
+      ]
+
+   , named "value both a number and concatenative" $ assertRejected isUnsatisfiedConstraint $ inIntrinsicModule
+      [ "fn f (Int) -> Int;"
+      , "fn f n = let g = .\\x -> (x + x) <> x in n;"
+      ]
+
+   , named "number whose type is never fixed" $ assertRejected isAmbiguousConstraint $ inIntrinsicModule
+      [ "fn f (Int) -> Int;"
+      , "fn f n = let g = .\\x -> x + x in n;"
+      ]
+   ]
+
+intrinsicDeclarationTests :: Test
+intrinsicDeclarationTests = TestList
+   [ named "intrinsic the compiler defines" $ assertAnalyzes $ inModule
+      [ "@Intrinsic"
+      , "extern fn opSub (Int, Int) -> Int;"
+      ]
+
+   , named "intrinsic the compiler does not define" $ assertRejected isUnknownIntrinsic $ inModule
+      [ "@Intrinsic"
+      , "extern fn opTeleport (Int) -> Int;"
+      ]
+
+   , named "intrinsic with the wrong number of parameters" $ assertRejected isIntrinsicArityMismatch $ inModule
+      [ "@Intrinsic"
+      , "extern fn opNeg (Int, Int) -> Int;"
+      ]
+   ]
+
+-- | A single module `T` whose operators take any number or concatenative type,
+--   as the intrinsic operators of Std do.
+inIntrinsicModule :: [Text] -> [Text]
+inIntrinsicModule declarations =
+   let prelude =
+         [ "module T exports *"
+         , "extern type Int;"
+         , "extern type Long;"
+         , "extern type Double;"
+         , "extern type String;"
+         , "extern type List a;"
+         , "type Bool = True | False;"
+         , "@Intrinsic"
+         , "extern fn opAdd (number, number) -> number;"
+         , "@Intrinsic"
+         , "extern fn opEq (number, number) -> Bool;"
+         -- the compiler has no C code for `opConcat` yet, so it is not @Intrinsic here
+         , "extern fn opConcat (concatenative, concatenative) -> concatenative;"
+         ]
+   in [T.unlines (prelude ++ declarations)]
+
 -- | The lines every test module starts with: there are no builtin types or
 --   operators, so `Int`, `Bool` and the arithmetic functions are declared here.
 preludeLines :: [Text]
@@ -553,6 +664,14 @@ isNotAFunction = \case { SETypeCheckError (SENotAFunction {}) -> True; _ -> Fals
 isCtorArityMismatch = \case { SETypeCheckError (SECtorArityMismatch {}) -> True; _ -> False }
 isFnArityMismatch = \case { SETypeCheckError (SEFnArityMismatch {}) -> True; _ -> False }
 isSystemArityMismatch = \case { SETypeCheckError (SESystemArityMismatch {}) -> True; _ -> False }
+
+isUnknownIntrinsic, isIntrinsicArityMismatch :: SemError -> Bool
+isUnknownIntrinsic = \case { SEModifierError (SEUnknownIntrinsic {}) -> True; _ -> False }
+isIntrinsicArityMismatch = \case { SEModifierError (SEIntrinsicArityMismatch {}) -> True; _ -> False }
+
+isUnsatisfiedConstraint, isAmbiguousConstraint :: SemError -> Bool
+isUnsatisfiedConstraint = \case { SETypeCheckError (SEUnsatisfiedConstraint {}) -> True; _ -> False }
+isAmbiguousConstraint = \case { SETypeCheckError (SEAmbiguousConstraint {}) -> True; _ -> False }
 
 isUnknownField, isNotARecordType, isInvalidTupleIndex, isNonExhaustiveMatch :: SemError -> Bool
 isUnknownField = \case { SETypeCheckError (SEUnknownField {}) -> True; _ -> False }

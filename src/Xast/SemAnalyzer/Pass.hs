@@ -19,7 +19,7 @@ import Xast.SemAnalyzer.Declare (declareStmts)
 import Xast.SemAnalyzer.Imports (importAnalysis)
 import Xast.SemAnalyzer.TypeCheck (typeCheck)
 import Xast.SemAnalyzer.Desugar (desugarProgram)
-import Xast.SemAnalyzer.Unify (zonkProgram)
+import Xast.SemAnalyzer.Unify (zonkProgram, reportAmbiguousConstraints)
 
 -- #### FULL ANALYSIS ####
 
@@ -46,7 +46,7 @@ fullAnalysis reportWarnings saveFile programs target = do
    (programsResolved, symTable4, warnings4) <- ExceptT $ pure $ runPhase env symTable3 (forM programsQualified resolveNames)
    lift $ reportWarnings warnings4
 
-   (programsTyped, symTable5, warnings5) <- ExceptT $ pure $ runPhase env symTable4 (forM programsResolved typeCheck)
+   (programsTyped, symTable5, warnings5) <- ExceptT $ pure $ runPhase env symTable4 (forM programsResolved typeCheck <* reportAmbiguousConstraints)
    lift $ reportWarnings warnings5
 
    -- Types stored on AST nodes may have been frozen before later unification
@@ -63,7 +63,26 @@ fullAnalysis reportWarnings saveFile programs target = do
       { warningsCount = warningsCount
       , progs = programsDesugared
       , ctorSpans = collectCtorSpans symTable6
+      , intrinsics = collectIntrinsics programsDesugared symTable6
       }
+
+-- | The extern functions marked @Intrinsic, which the compiler itself defines.
+collectIntrinsics :: [Program Desugared] -> SymTable -> M.Map ExternId IntrinsicDecl
+collectIntrinsics programs symTable = M.fromList
+   [ (externId, intrinsicDecl program extern)
+   | program <- programs
+   , StmtExtern (ExtFunc extern) <- program.stmts
+   , ExtFnMod ModIntrinsic `elem` extern.modifiers
+   , Just moduleInfo <- [M.lookup program.moduleDef.name symTable.modules]
+   , Just (SymbolExternFn _ externId _) <- [M.lookup extern.name moduleInfo.symbols]
+   ]
+
+intrinsicDecl :: Program Desugared -> ExternFunc -> IntrinsicDecl
+intrinsicDecl program extern = IntrinsicDecl
+   { name    = QualifiedIdent { moduleName = Just program.moduleDef.name, name = extern.name }
+   , args    = map (.node) extern.args
+   , retType = extern.retType.node
+   }
 
 -- | Number of constructors of the owning type for every constructor id
 -- (`maxBound` for non-exhaustive types), used by the decision tree compiler.

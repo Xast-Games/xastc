@@ -11,6 +11,7 @@ import Xast.Error.Types
 import Xast.SemAnalyzer.Monad
 import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Unify (freshConstructorId, freshExternId, freshFunctionId)
+import Xast.Codegen.C.Intrinsics (IntrinsicDefinition (..), intrinsicDefinitions)
 
 -- #### DECLARE STATEMENTS ####
 
@@ -44,8 +45,9 @@ declareStmt = \case
    StmtTypeDef typeDef@(TypeDef _ _ ident _ _) ->
       declareType ident typeDef
 
-   StmtExtern (ExtFunc externFunc@(ExternFunc _ _ ident _ _)) ->
+   StmtExtern (ExtFunc externFunc@(ExternFunc _ _ ident _ _)) -> do
       declareExternFn ident externFunc
+      checkIntrinsic externFunc
 
    StmtExtern (ExtType externType@(ExternType _ ident _)) ->
       declareExternType ident externType
@@ -125,6 +127,23 @@ checkTagType typeDef =
        invalidTag = SEInvalidTagType typeDef.location typeDef.name
    in when (isTag && not (isPlainMarker typeDef)) $
          errSem invalidTag
+
+-- | An extern function marked @Intrinsic must be one the compiler defines,
+--   declared with as many parameters as the compiler's definition has.
+checkIntrinsic :: ExternFunc -> SemAnalyzer ()
+checkIntrinsic extern =
+   let isIntrinsic = ExtFnMod ModIntrinsic `elem` extern.modifiers
+       declaredArity = length extern.args
+       arityMismatch definition = SEIntrinsicArityMismatch
+         { location      = extern.location
+         , name          = extern.name
+         , expectedArity = definition.arity
+         , actualArity   = declaredArity
+         }
+   in when isIntrinsic $ case M.lookup extern.name intrinsicDefinitions of
+         Nothing -> errSem (SEUnknownIntrinsic extern.location extern.name)
+         Just definition -> unless (definition.arity == declaredArity) $
+            errSem (arityMismatch definition)
 
 -- | Whether a type has no type parameters and a single constructor without fields.
 isPlainMarker :: TypeDef -> Bool

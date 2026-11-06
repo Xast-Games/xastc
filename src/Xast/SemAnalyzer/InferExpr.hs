@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.InferExpr where
 
@@ -37,8 +35,8 @@ inferType imports expression = case expression of
             fresh <- mapM (const freshTyVar) varInfo.quantified
             pure (substTyVars (M.fromList (zip varInfo.quantified fresh)) varType)
          Nothing -> case moduleSymbol <|> importedSymbol of
-            Just (SymbolFn _ _ signature)       -> instantiate signature
-            Just (SymbolExternFn _ _ signature) -> instantiate signature
+            Just (SymbolFn _ _ signature)       -> instantiate location signature
+            Just (SymbolExternFn _ _ signature) -> instantiate location signature
             _                                   -> do
                errSem (SEUndefinedVar location name)
                pure TyInvalid
@@ -47,8 +45,8 @@ inferType imports expression = case expression of
    ExpVar (ResolvedInfo location maybeResolution) (Just alias) name -> do
       symbol <- lookupQualifiedSymbol imports alias name
       exprType <- case symbol of
-         Just (SymbolFn _ _ signature)       -> instantiate signature
-         Just (SymbolExternFn _ _ signature) -> instantiate signature
+         Just (SymbolFn _ _ signature)       -> instantiate location signature
+         Just (SymbolExternFn _ _ signature) -> instantiate location signature
          _                                   -> do
             errSem (SEUndefinedVar location name)
             pure TyInvalid

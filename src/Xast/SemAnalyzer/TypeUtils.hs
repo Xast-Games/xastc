@@ -13,9 +13,9 @@ import Xast.SemAnalyzer.Monad
 import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Query (findAnyTypeModule, findTypeModule)
 import Control.Applicative ((<|>))
-import Xast.Utils.Generic (unreachableWith)
+import Xast.Utils.Generic (unreachableWith, (|>))
 import qualified Data.Text as T
-import Xast.SemAnalyzer.Unify (bindVar, freshTyVar, occursCheckType, resolve, substGnr, unify)
+import Xast.SemAnalyzer.Unify (bindOrFail, freshTyVar, resolve, substGnr, unify)
 
 ctorType :: Location -> SymbolInfo -> SemAnalyzer Type
 ctorType _ (SymbolCtor _ _ (CtorSig ownerIdent generics _ fieldTys)) = do
@@ -43,10 +43,8 @@ applyTypes location applicantTy operandTy = do
 
       TyVar varId -> do
          returnTypeVar <- freshTyVar
-         occurs <- occursCheckType varId (TyFn [operandTy] returnTypeVar)
-         if occurs
-            then errSem (SEInfiniteType location varId applicantTy') >> pure TyInvalid
-            else bindVar varId (TyFn [operandTy] returnTypeVar) >> pure returnTypeVar
+         bindOrFail location varId (TyFn [operandTy] returnTypeVar)
+         pure returnTypeVar
 
       _ -> do
          errSem (SENotAFunction location applicantTy')
@@ -58,8 +56,8 @@ applyTypes location applicantTy operandTy = do
 -- message with a stable (expected, current) type ordering.
 compareTypes :: Location -> Type -> Type -> SemAnalyzer ()
 compareTypes location expected current = do
-   ((), reports) <- censor (const []) $ listen (unify location expected current)
-   when (any isSemError reports) $ do
+   mismatched <- unifyMismatched (unify location expected current)
+   when mismatched $ do
       expected' <- resolve expected
       current' <- resolve current
       errSem (SETypeError location expected' current')
@@ -68,8 +66,8 @@ compareTypes location expected current = do
 -- `then`/`else`-specific mismatch instead of a generic type error.
 compareThenElse :: Location -> Type -> Location -> Type -> SemAnalyzer ()
 compareThenElse thenLoc thenType elseLoc elseType = do
-   ((), reports) <- censor (const []) $ listen (unify thenLoc thenType elseType)
-   when (any isSemError reports) $ do
+   mismatched <- unifyMismatched (unify thenLoc thenType elseType)
+   when mismatched $ do
       thenType' <- resolve thenType
       elseType' <- resolve elseType
       errSem (SEThenElseTypeMismatch thenLoc thenType' elseLoc elseType')
@@ -77,15 +75,30 @@ compareThenElse thenLoc thenType elseLoc elseType = do
 -- | Unifies two list element types
 compareListElems :: Location -> Type -> Location -> Type -> SemAnalyzer ()
 compareListElems firstLoc firstTy otherLoc otherTy = do
-   ((), reports) <- censor (const []) $ listen (unify firstLoc firstTy otherTy)
-   when (any isSemError reports) $ do
+   mismatched <- unifyMismatched (unify firstLoc firstTy otherTy)
+   when mismatched $ do
       firstTy' <- resolve firstTy
       otherTy' <- resolve otherTy
       errSem (SEListElementTypeMismatch firstLoc firstTy' otherLoc otherTy')
 
+-- | Runs a unification whose mismatch the caller reports in its own words, and
+--   says whether there was one. An unsatisfied constraint is not a mismatch of
+--   the two types, so it is still reported as it is.
+unifyMismatched :: SemAnalyzer () -> SemAnalyzer Bool
+unifyMismatched unification = do
+   ((), reports) <- censor (filter isConstraintError) $ listen unification
+   let mismatches = reports
+         |> filter isSemError
+         |> filter (not . isConstraintError)
+   pure (not (null mismatches))
+
 isSemError :: SemReport -> Bool
 isSemError (SemError _) = True
 isSemError _            = False
+
+isConstraintError :: SemReport -> Bool
+isConstraintError (SemError (SETypeCheckError (SEUnsatisfiedConstraint {}))) = True
+isConstraintError _                                                         = False
 
 literalType :: [Located ImportDef] -> Literal -> SemAnalyzer Type
 literalType imports = \case

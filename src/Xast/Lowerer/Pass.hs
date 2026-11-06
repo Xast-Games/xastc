@@ -11,12 +11,16 @@ import qualified Data.Map as M
 import Control.Monad.Identity (Identity(runIdentity))
 import Xast.Lowerer.Definition (lowerFunction, lowerSystem)
 
-lowerPrograms :: M.Map ConstructorId Int -> [Program Desugared] -> ([Kira], [KirTypeDef])
-lowerPrograms spans programs =
+lowerPrograms
+   :: M.Map ConstructorId Int
+   -> M.Map ExternId IntrinsicDecl  -- ^ extern functions marked @Intrinsic
+   -> [Program Desugared]
+   -> ([Kira], [KirTypeDef], [KirIntrinsicDef])
+lowerPrograms spans intrinsics programs =
    let lowered = forM programs lowerProgram <* requestTagTypes <* drainTypes
-       ((irs, typeDefs), _) = runIdentity $
-         runLowerer (newLowerState spans programs) lowered
-   in (irs, typeDefs)
+       ((irs, typeDefs), finalState) = runIdentity $
+         runLowerer (newLowerState spans intrinsics programs) lowered
+   in (irs, typeDefs, M.elems finalState.intrinsicInsts)
 
 lowerProgram :: Program Desugared -> Lowerer Kira
 lowerProgram program = do

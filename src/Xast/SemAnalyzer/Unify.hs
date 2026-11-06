@@ -3,25 +3,49 @@
 module Xast.SemAnalyzer.Unify where
 
 import Control.Monad.State
-import Control.Monad (zipWithM_, forM)
+import Control.Monad.Reader (asks)
+import Control.Monad (zipWithM_, forM, forM_, unless, filterM)
+import Data.List (nubBy)
+import Data.Function (on)
 import qualified Data.Set as S
 import qualified Data.Map as M
+
+import Xast.Utils.Generic ((|>))
 import Xast.AST
 import Xast.Error.Types
 import Xast.SemAnalyzer.Monad
 import Xast.SemAnalyzer.Types
-import Control.Monad.RWS (asks)
 
 withType :: WithType -> Type
 withType (WithEvent lt) = lt.node
 withType (WithRes lt)   = lt.node
 
 freshTyVar :: SemAnalyzer Type
-freshTyVar = do
+freshTyVar = TyVar <$> freshTyVarId
+
+freshTyVarId :: SemAnalyzer Int
+freshTyVarId = do
    currentState <- get
    let nextId = currentState.tyVarSupply
    put currentState { tyVarSupply = nextId + 1 }
-   return $ TyVar nextId
+   return nextId
+
+-- | A fresh type variable that may only stand for types of the given kind.
+freshConstrainedVar
+   :: Location     -- ^ the expression whose signature introduces the variable
+   -> TyIntrinsic
+   -> SemAnalyzer Type
+freshConstrainedVar origin kind = do
+   varId <- freshTyVarId
+   constrainVar varId TyVarConstraint { kind = kind, origin = origin }
+   return $ TyVar varId
+
+constrainVar :: Int -> TyVarConstraint -> SemAnalyzer ()
+constrainVar varId constraint = modify $ \currentState -> currentState
+   { tyVarConstraints = M.insert varId constraint currentState.tyVarConstraints }
+
+lookupConstraint :: Int -> SemAnalyzer (Maybe TyVarConstraint)
+lookupConstraint varId = gets (M.lookup varId . (.tyVarConstraints))
 
 freeTyVars :: Type -> S.Set Int
 freeTyVars ty = go [ty] S.empty
@@ -43,7 +67,10 @@ generalize ty = do
       varType <- resolve varInfo.ty
       pure (freeTyVars varType S.\\ S.fromList varInfo.quantified)
 
-   return $ S.toList (freeTyVars resolvedType S.\\ envFree)
+   -- A constrained variable is never generalized: each use of a generalized
+   -- variable may pick its own type, but `number` must end up as one concrete type.
+   constrained <- gets (M.keysSet . (.tyVarConstraints))
+   return $ S.toList (freeTyVars resolvedType S.\\ envFree S.\\ constrained)
 
 freshVarId :: SemAnalyzer VarId
 freshVarId = do
@@ -129,6 +156,7 @@ unify location left right = do
 
       (TyCon a, TyCon b) | a == b -> pure ()
       (TyGnr a, TyGnr b) | a == b -> pure ()
+      (TyInt a, TyInt b) | a == b -> pure ()
 
       (TyApp a1 b1, TyApp a2 b2) -> unify location a1 a2 >> unify location b1 b2
       (TyTuple xs, TyTuple ys) | length xs == length ys ->
@@ -146,7 +174,66 @@ unify location left right = do
 bindOrFail :: Location -> Int -> Type -> SemAnalyzer ()
 bindOrFail location varId boundType = do
    occurs <- occursCheckType varId boundType
-   if occurs then errSem (SEInfiniteType location varId boundType) else bindVar varId boundType
+   if occurs
+      then errSem (SEInfiniteType location varId boundType)
+      else do
+         checkConstraint location varId boundType
+         bindVar varId boundType
+
+-- | Reports binding a constrained type variable to a type it may not stand for.
+--   A variable bound to another variable hands its constraint over to it.
+checkConstraint :: Location -> Int -> Type -> SemAnalyzer ()
+checkConstraint location varId boundType = lookupConstraint varId >>= \case
+   Nothing -> pure ()
+   Just constraint -> case boundType of
+      TyVar otherId -> passConstraint location constraint otherId
+      _ -> unless (satisfiesConstraint constraint.kind boundType) $
+         errSem (unsatisfiedConstraint location constraint boundType)
+
+-- | Constrains a variable that another, constrained variable is bound to.
+--   Both constraints must then hold, and no type is both a number and concatenative.
+passConstraint :: Location -> TyVarConstraint -> Int -> SemAnalyzer ()
+passConstraint location constraint otherId = lookupConstraint otherId >>= \case
+   Nothing -> constrainVar otherId constraint
+   Just existing -> unless (existing.kind == constraint.kind) $
+      errSem (unsatisfiedConstraint location constraint (TyInt existing.kind))
+
+unsatisfiedConstraint :: Location -> TyVarConstraint -> Type -> TypeCheckError
+unsatisfiedConstraint location constraint actual = SEUnsatisfiedConstraint
+   { location   = location
+   , constraint = constraint.kind
+   , origin     = constraint.origin
+   , actual     = actual
+   }
+
+-- | Whether a type, which is not a type variable, may be what a constrained variable stands for.
+satisfiesConstraint :: TyIntrinsic -> Type -> Bool
+satisfiesConstraint kind type' = case (kind, type') of
+   -- a `number` of a signature in Std stands for whichever number its caller picks
+   (_, TyInt other)                  -> other == kind
+   (_, TyInvalid)                    -> True
+   (TyNumber, TyCon qualified)       -> qualified.name `elem` numberTypeNames
+   (TyConcat, TyCon qualified)       -> qualified.name == stringTypeName
+   (TyConcat, TyApp (TyCon list) _)  -> list.name == listTypeName
+   _                                 -> False
+
+-- | Reports every constrained type variable that no use fixed to a type, as
+--   an addition of some number cannot be compiled. Run after type checking.
+reportAmbiguousConstraints :: SemAnalyzer ()
+reportAmbiguousConstraints = do
+   constraints <- gets (M.toList . (.tyVarConstraints))
+   unresolved <- filterM (isUnresolvedVar . fst) constraints
+   let byOrigin = unresolved
+         |> map snd
+         |> nubBy ((==) `on` (.origin))
+   forM_ byOrigin $ \constraint ->
+      errSem SEAmbiguousConstraint { location = constraint.origin, constraint = constraint.kind }
+
+-- | A type variable that is bound to nothing, not even to another variable.
+isUnresolvedVar :: Int -> SemAnalyzer Bool
+isUnresolvedVar varId = do
+   resolved <- resolve (TyVar varId)
+   pure (resolved == TyVar varId)
 
 occursCheckType :: Int -> Type -> SemAnalyzer Bool
 occursCheckType varId t = do
@@ -158,12 +245,42 @@ occursCheckType varId t = do
       TyFn args ret    -> ((||) . or <$> mapM (occursCheckType varId) args) <*> occursCheckType varId ret
       _                -> pure False
 
-instantiate :: FuncSig -> SemAnalyzer Type
-instantiate (FuncSig args ret) = do
+-- | The type of one use of a function: every generic gets a fresh type variable,
+--   and so does every intrinsic kind. All the @number@s of one signature are the
+--   same type, as in @opAdd (number, number) -> number@.
+instantiate
+   :: Location  -- ^ the expression that uses the function
+   -> FuncSig
+   -> SemAnalyzer Type
+instantiate location (FuncSig args ret) = do
    let generics = S.toList (foldMap collectGnrs args <> collectGnrs ret)
    fresh <- mapM (const freshTyVar) generics
    let substitution = M.fromList (zip generics fresh)
-   pure $ TyFn (map (substGnr substitution) args) (substGnr substitution ret)
+
+   let kinds = S.toList (foldMap collectIntrinsics args <> collectIntrinsics ret)
+   constrained <- mapM (freshConstrainedVar location) kinds
+   let intrinsicSubstitution = M.fromList (zip kinds constrained)
+
+   let instantiateType type' = type'
+         |> substGnr substitution
+         |> substIntrinsic intrinsicSubstitution
+   pure $ TyFn (map instantiateType args) (instantiateType ret)
+
+collectIntrinsics :: Type -> S.Set TyIntrinsic
+collectIntrinsics = \case
+   TyInt kind       -> S.singleton kind
+   TyApp func arg   -> collectIntrinsics func <> collectIntrinsics arg
+   TyTuple elements -> foldMap collectIntrinsics elements
+   TyFn args result -> foldMap collectIntrinsics args <> collectIntrinsics result
+   _                -> S.empty
+
+substIntrinsic :: M.Map TyIntrinsic Type -> Type -> Type
+substIntrinsic substitution = \case
+   TyInt kind       -> M.findWithDefault (TyInt kind) kind substitution
+   TyApp func arg   -> TyApp (substIntrinsic substitution func) (substIntrinsic substitution arg)
+   TyTuple elements -> TyTuple (map (substIntrinsic substitution) elements)
+   TyFn args result -> TyFn (map (substIntrinsic substitution) args) (substIntrinsic substitution result)
+   other            -> other
 
 collectGnrs :: Type -> S.Set Ident
 collectGnrs = \case

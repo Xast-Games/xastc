@@ -66,6 +66,51 @@ requestType instance' = gets (M.lookup instance' . (.typeInsts)) >>= \case
          }
       pure kirName
 
+-- | The instance of an intrinsic at the types of one use, named like a type
+--   instance: @opAdd@ of @Std.Ops@ on @Int@ is @Std_Ops_opAdd_Std_Num_Int@.
+requestIntrinsic
+   :: IntrinsicDecl
+   -> Type  -- ^ the type of the intrinsic at this use, e.g. @fn(Int, Int) -> Int@
+   -> Lowerer KirName
+requestIntrinsic decl usedType = do
+   let declaredType = TyFn decl.args decl.retType
+   let typeParams = bindTypeParams declaredType usedType
+   typeArgs <- mapM monoType (M.elems typeParams)
+   let instance' = TypeInst { name = decl.name, args = typeArgs }
+
+   gets (M.lookup instance' . (.intrinsicInsts)) >>= \case
+      Just existing -> pure existing.name
+      Nothing -> do
+         (params, result) <- case usedType of
+            TyFn usedParams usedResult -> (,) <$> mapM monoType usedParams <*> monoType usedResult
+            other -> error ("intrinsic used at a non-function type " ++ show other)
+         let definition = KirIntrinsicDef
+               { name      = KirName (mangle instance')
+               , intrinsic = decl.name.name
+               , params    = params
+               , retTy     = result
+               }
+         modify $ \state -> state { intrinsicInsts = M.insert instance' definition state.intrinsicInsts }
+         pure definition.name
+
+-- | What each type parameter of a signature stands for at one use of it. The
+--   parameters are its generics and its @number@ or @concatenative@, each
+--   keyed by the type it is written as, so they come out in a fixed order.
+bindTypeParams
+   :: Type  -- ^ as declared, e.g. @fn(number, number) -> Bool@
+   -> Type  -- ^ as used, e.g. @fn(Int, Int) -> Bool@
+   -> M.Map Type Type
+bindTypeParams declared used = case (declared, used) of
+   (TyGnr _, _)                 -> M.singleton declared used
+   (TyInt _, _)                 -> M.singleton declared used
+   (TyApp declaredFunc declaredArg, TyApp usedFunc usedArg) ->
+      bindTypeParams declaredFunc usedFunc <> bindTypeParams declaredArg usedArg
+   (TyTuple declaredElements, TyTuple usedElements) ->
+      M.unions (zipWith bindTypeParams declaredElements usedElements)
+   (TyFn declaredParams declaredResult, TyFn usedParams usedResult) ->
+      M.unions (zipWith bindTypeParams declaredParams usedParams) <> bindTypeParams declaredResult usedResult
+   _                            -> M.empty
+
 -- | Requests every @Tag type up front. Other types are instantiated only when
 --   a function or system uses them, but a tag is an ECS component that must
 --   exist even if no code mentions it.

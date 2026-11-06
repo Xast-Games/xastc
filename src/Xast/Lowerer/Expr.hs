@@ -1,12 +1,15 @@
+{-# LANGUAGE LambdaCase #-}
 module Xast.Lowerer.Expr where
 
 import Xast.AST
 import Xast.Lowerer.Monad (Lowerer, freshKirName)
 import Xast.Lowerer.Types
-import Xast.Lowerer.Mono (monoType, mangleCtor, ctorResultTy)
+import Xast.Lowerer.Mono (monoType, mangleCtor, ctorResultTy, requestIntrinsic)
 import Xast.Utils.Generic (todo__)
 import Data.Maybe (fromJust)
 import qualified Data.Map as M
+import Control.Monad (when)
+import Control.Monad.State (gets)
 
 lowerExpr :: M.Map LocalId KirValue -> Expr Desugared -> Lowerer ([KirInstruct], KirValue)
 lowerExpr env expr = case expr of
@@ -31,15 +34,19 @@ lowerExpr env expr = case expr of
    ExpApp {} -> do
       let spine (ExpApp (DesugaredInfo exprType _) func arg) accumulator Nothing = spine func (arg : accumulator) (Just exprType)
           spine (ExpApp _ func arg) accumulator (Just inferred) = spine func (arg : accumulator) (Just inferred)
-          spine (ExpVar _ _ ident) accumulator accumulatedType = (fromJust accumulatedType, ident, accumulator)
+          spine (ExpVar info _ ident) accumulator accumulatedType = (fromJust accumulatedType, info, ident, accumulator)
           spine _ _ _ = todo__ "only direct function application is supported by the lowerer yet"
-          (retType, functionIdent, args) = spine expr [] Nothing
+          (retType, calleeInfo, functionIdent, args) = spine expr [] Nothing
 
       lowered <- mapM (lowerExpr env) args
       resultName <- freshKirName
       retType' <- monoType retType
-      let instrs = concatMap fst lowered ++ [KirCall retType' (KirName functionIdent.inner) (map snd lowered) (Just resultName)]
-      pure (instrs, KirVar resultName)
+      intrinsic <- lookupIntrinsic calleeInfo.res
+      callee <- case intrinsic of
+         Just decl -> intrinsicCallee decl calleeInfo.ty retType'
+         Nothing   -> pure (KirName functionIdent.inner)
+      let call = KirCall retType' callee (map snd lowered) (Just resultName)
+      pure (concatMap fst lowered ++ [call], KirVar resultName)
 
    ExpLetIn _ letIn -> do
       (bindInstrs, env') <- lowerLetBindings env letIn.bindings
@@ -49,6 +56,27 @@ lowerExpr env expr = case expr of
    unsupportedExpr -> todo__ $ 
       "this expression form is not supported by the lowerer yet:\n" ++
       show unsupportedExpr
+
+-- | The intrinsic a callee is, if it is an extern function marked @Intrinsic.
+lookupIntrinsic :: Maybe Resolution -> Lowerer (Maybe IntrinsicDecl)
+lookupIntrinsic = \case
+   Just (ResExternFunction externId) -> gets (M.lookup externId . (.intrinsics))
+   _                                 -> pure Nothing
+
+-- | The instance of an intrinsic that a fully applied call uses.
+intrinsicCallee
+   :: IntrinsicDecl
+   -> Type           -- ^ the type of the callee at this use, e.g. @fn(Int, Int) -> Int@
+   -> Type           -- ^ the monomorphic result of the call
+   -> Lowerer KirName
+intrinsicCallee decl calleeType resultType = do
+   when (isFunctionType resultType) $
+      todo__ ("partially applied intrinsic `" ++ show decl.name.name ++ "` is not supported by the lowerer yet")
+   requestIntrinsic decl calleeType
+
+isFunctionType :: Type -> Bool
+isFunctionType (TyFn _ _) = True
+isFunctionType _          = False
 
 lowerLetBindings
    :: M.Map LocalId KirValue

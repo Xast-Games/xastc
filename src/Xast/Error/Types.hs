@@ -121,6 +121,16 @@ data ModifierError
       { location :: Location
       , typeName :: TypeName
       }
+   | SEUnknownIntrinsic
+      { location :: Location
+      , name     :: FunctionName  -- ^ marked @Intrinsic, but the compiler does not define it
+      }
+   | SEIntrinsicArityMismatch
+      { location      :: Location
+      , name          :: FunctionName
+      , expectedArity :: Int  -- ^ the parameters of the compiler's definition
+      , actualArity   :: Int  -- ^ the parameters of the declaration
+      }
    deriving Show
 
 instance ToSemError ModifierError where
@@ -232,6 +242,16 @@ data TypeCheckError
       { location  :: Location
       , typeVar   :: Int   -- ^ id of the type variable
       , boundType :: Type  -- ^ the type it would be bound to, which contains it
+      }
+   | SEUnsatisfiedConstraint
+      { location   :: Location
+      , constraint :: TyIntrinsic  -- ^ what the type had to be, e.g. @number@
+      , origin     :: Location     -- ^ the expression whose signature requires it, e.g. an operator
+      , actual     :: Type
+      }
+   | SEAmbiguousConstraint
+      { location   :: Location     -- ^ the expression whose signature introduced the type
+      , constraint :: TyIntrinsic
       }
    | SETooManyArgs
       { location     :: Location

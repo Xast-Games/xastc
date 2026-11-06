@@ -2,12 +2,13 @@ module Xast.Codegen.C.Monad where
 
 import Control.Monad.Identity (Identity)
 import Control.Monad.Reader (ReaderT (runReaderT))
-import Xast.Lowerer.Types (KirTypeDef)
+import Xast.Lowerer.Types (KirTypeDef, KirIntrinsicDef)
 import Xast.Codegen.C.Types (EcsTag)
 
 data CCodegenEnv = CCodegenEnv
-   { types   :: [KirTypeDef]
-   , ecsTags :: [EcsTag] 
+   { types      :: [KirTypeDef]
+   , ecsTags    :: [EcsTag] 
+   , intrinsics :: [KirIntrinsicDef]  -- ^ every instance of an intrinsic the program uses
    }
    deriving Show
 

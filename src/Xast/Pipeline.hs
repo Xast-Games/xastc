@@ -86,18 +86,18 @@ runCompile_ dir = runExceptT $ do
 
    -- Semantic analysis
    semResult <- runExceptT $ fullAnalysis  (lift . printWarnings) (\path content -> liftIO $ writeFile path content) programs target
-   (warnings, progsAnalyzed, ctorSpans) <- case semResult of
+   (warnings, progsAnalyzed, ctorSpans, intrinsics) <- case semResult of
       Left errs -> throwError (XastSemAnalyzeError <$> errs)
-      Right res -> return (res.warningsCount, res.progs, res.ctorSpans)
+      Right res -> return (res.warningsCount, res.progs, res.ctorSpans, res.intrinsics)
 
    -- Lowering AST into KIRA
-   let (loweredIR, typeDefs) = lowerPrograms ctorSpans progsAnalyzed
+   let (loweredIR, typeDefs, intrinsicDefs) = lowerPrograms ctorSpans intrinsics progsAnalyzed
 
    -- Erasing zero-sized types: they have no representation in C
    let EraseResult erasedIR erasedTypeDefs ecsTags = eraseZeroSized loweredIR typeDefs
 
    -- Generating C
-   let generatedC = codegen erasedIR erasedTypeDefs ecsTags
+   let generatedC = codegen erasedIR erasedTypeDefs ecsTags intrinsicDefs
 
    -- Temporarily print C programs as debug
    ----------------------------------------

@@ -5,18 +5,26 @@ use Std.Num { USize }
 --| Raw ptr type
 extern type RawPtr;
 
+@Intrinsic
 extern fn alloc (USize) -> RawPtr;
 
+@Intrinsic
 extern fn realloc (RawPtr, USize) -> RawPtr;
 
+@Intrinsic
 extern fn free (RawPtr) -> ();
 
+@Intrinsic
 extern fn ptrRead (RawPtr, USize) -> a;
 
+@Intrinsic
 extern fn ptrWrite (RawPtr, USize, a) -> ();
 
+@Intrinsic
 extern fn ptrOffset (RawPtr, USize) -> RawPtr;
 
+@Intrinsic
 extern fn ptrCopy (RawPtr, RawPtr, USize) -> ();
 
+@Intrinsic
 extern fn ptrMove (RawPtr, RawPtr, USize) -> ();

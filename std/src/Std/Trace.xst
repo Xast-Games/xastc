@@ -1,0 +1,4 @@
+module Std.Trace exports *
+
+@Intrinsic
+extern fn debugTrace (String) -> ();

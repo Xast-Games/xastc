@@ -42,8 +42,8 @@ fn f x = x;
 --fn f () -> (Bool, Int);
 --fn f = 
     --let id = .\x -> x,
-    --let a = id True,
-    --let b = id 12
+    --let a  = id True,
+    --let b  = id 12
     --in (a, b);
 
 --fn double (Int) -> Int;

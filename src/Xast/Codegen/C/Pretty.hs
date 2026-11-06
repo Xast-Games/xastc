@@ -101,6 +101,7 @@ prettyField (name, fieldType) =
 
 prettyFunction :: CFunction -> Doc ann
 prettyFunction func = 
+   prettyLinkage func.linkage <>
    prettyType func.ty <+>
    pretty func.name <>
    encloseSep "(" ")" ", " (map prettyArg func.args) <+>
@@ -109,6 +110,11 @@ prettyFunction func =
       , indent 4 (vsep (map prettyStmt func.body))
       , "}"
       ]
+
+prettyLinkage :: CLinkage -> Doc ann
+prettyLinkage = \case
+   CExternal     -> mempty
+   CStaticInline -> "static inline "
 
 prettyStmt :: CStmt -> Doc ann
 prettyStmt = \case
@@ -170,9 +176,26 @@ prettyExpr = \case
    CIntLit int           -> pretty int
    CFloatLit float       -> pretty float
    CInvoke caller args   -> prettyExpr caller <> encloseSep "(" ")" ", " (map prettyCArg args)
-   CBinary op left right -> prettyExpr left <+> prettyBinOp op <+> prettyExpr right
-   CUnary op operand     -> prettyUnOp op <> prettyExpr operand
+   CBinary op left right -> prettyOperand left <+> prettyBinOp op <+> prettyOperand right
+   CUnary op operand     -> prettyUnOp op <> prettyOperand operand
    CAssign left right    -> prettyExpr left <+> "=" <+> prettyExpr right
+   CConditional condition whenTrue whenFalse ->
+      prettyOperand condition <+> "?" <+> prettyOperand whenTrue <+> ":" <+> prettyOperand whenFalse
+
+-- | An expression inside another one, in parentheses when it is made of
+--   operators, so the precedence of C operators never regroups it. Unary
+--   operators bind tighter than all others and need none.
+prettyOperand :: CExpr -> Doc ann
+prettyOperand expr
+   | isCompound expr = enclose "(" ")" (prettyExpr expr)
+   | otherwise       = prettyExpr expr
+
+isCompound :: CExpr -> Bool
+isCompound = \case
+   CBinary {}      -> True
+   CAssign {}      -> True
+   CConditional {} -> True
+   _               -> False
 
 prettyCArg :: CArg -> Doc ann
 prettyCArg = \case
@@ -185,6 +208,7 @@ prettyBinOp = \case
    Sub -> "-"
    Mul -> "*"
    Div -> "/"
+   Mod -> "%"
    Eq -> "=="
    Ne -> "!="
    Lt -> "<"
@@ -193,6 +217,11 @@ prettyBinOp = \case
    Ge -> ">="
    And -> "&&"
    Or -> "||"
+   BitAnd -> "&"
+   BitOr -> "|"
+   BitXor -> "^"
+   Shl -> "<<"
+   Shr -> ">>"
 
 prettyUnOp :: CUnOp -> Doc ann
 prettyUnOp = \case

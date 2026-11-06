@@ -14,6 +14,8 @@ data LowerState = LowerState
    , typeQueue  :: [TypeInst]
    , ctorSpans  :: M.Map ConstructorId Int
    , ctorFieldNames :: M.Map QualifiedIdent [FieldName]  -- ^ declared field names of each constructor
+   , intrinsics :: M.Map ExternId IntrinsicDecl  -- ^ extern functions the compiler defines itself
+   , intrinsicInsts :: M.Map TypeInst KirIntrinsicDef  -- ^ an intrinsic with the types it is used at
    }
 
 data TypeInst = TypeInst
@@ -24,10 +26,13 @@ data TypeInst = TypeInst
 
 newLowerState 
    :: M.Map ConstructorId Int 
+   -> M.Map ExternId IntrinsicDecl
    -> [Program Desugared]
    -> LowerState
-newLowerState spans progs = LowerState 
+newLowerState spans intrinsics progs = LowerState 
    { nameSupply   = 0
+   , intrinsics   = intrinsics
+   , intrinsicInsts = M.empty
    , ctorSpans    = spans
    , typeTmpls    = M.fromList
       [ (declaredIn p td.name, td) | p <- progs, StmtTypeDef td <- p.stmts ] 
@@ -47,6 +52,16 @@ data Kira = Kira
    { moduleName :: Module
    , systems    :: [KirSystem]
    , functions  :: [KirFunction]
+   }
+   deriving Show
+
+-- | One instance of an intrinsic, e.g. @opAdd@ on @Int@. The code generator
+--   writes its body, so here it has only its signature.
+data KirIntrinsicDef = KirIntrinsicDef
+   { name      :: KirName       -- ^ e.g. @Std_Ops_opAdd_Std_Num_Int@
+   , intrinsic :: FunctionName  -- ^ e.g. @opAdd@
+   , params    :: [Type]        -- ^ monomorphic
+   , retTy     :: Type          -- ^ monomorphic
    }
    deriving Show
 

@@ -11,18 +11,18 @@ data AnalysisResult = AnalysisResult
    { warningsCount :: Int
    , progs         :: [Program Desugared]
    , ctorSpans     :: M.Map ConstructorId Int
+   , intrinsics    :: M.Map ExternId IntrinsicDecl
    }
 
 data Env = Env
    { vars      :: M.Map VarName VarInfo
    , functions :: M.Map FunctionName FuncSig
    , systems   :: M.Map SystemName SystemSig
-   , allowedIntrinsics :: [FunctionName]
    , currentTarget :: Target
    }
 
 emptyEnv :: Target -> Env
-emptyEnv = Env M.empty M.empty M.empty allowedIntrinsics
+emptyEnv = Env M.empty M.empty M.empty
 
 data SymTable = SymTable
    { modules         :: M.Map Module ModuleInfo
@@ -34,6 +34,15 @@ data SymTable = SymTable
    , externIdSupply  :: Int
    , tyVarSupply     :: Int
    , tySubst         :: M.Map Int Type
+   , tyVarConstraints :: M.Map Int TyVarConstraint  -- ^ type variables that may stand only for some types
+   }
+   deriving (Eq, Show)
+
+-- | What a type variable introduced for a @number@ or @concatenative@ of a
+--   signature may stand for, e.g. the operands of @opAdd@.
+data TyVarConstraint = TyVarConstraint
+   { kind   :: TyIntrinsic
+   , origin :: Location  -- ^ the expression whose signature introduced the variable
    }
    deriving (Eq, Show)
 
@@ -48,6 +57,7 @@ emptySymTable = SymTable
    , externIdSupply = 0
    , tyVarSupply = 0
    , tySubst = M.empty
+   , tyVarConstraints = M.empty
    }
 
 data QualifiedName = QualifiedName
