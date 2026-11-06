@@ -1436,6 +1436,25 @@ programTests = TestLabel "Programs" $ TestList
             ]
             src)
 
+   -- a module without declarations, which only re-exports what it imports
+   , TestCase $
+      let src = T.unlines
+            [ "module Prelude exports { inc }"
+            , "use Math *"
+            ]
+      in assertParsesProgram src
+         (Program
+            (ModuleDef
+                  testLocation
+                  (Module [Ident "Prelude"])
+                  (loc (ExpSelect [Ident "inc"])))
+            [loc $
+               ImportDef
+                  (Module [Ident "Math"])
+                  ImpFull]
+            []
+            src)
+
    -- Failures
    , TestCase $
       assertFails program ""
@@ -1443,10 +1462,6 @@ programTests = TestLabel "Programs" $ TestList
    , TestCase $
       assertFails program
          "fn main () -> Int;"
-
-   , TestCase $
-      assertFails program
-         "module Main exports *"
 
    , TestCase $
       assertFails program $

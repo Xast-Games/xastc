@@ -123,13 +123,13 @@ data ModifierError
       }
    | SEUnknownIntrinsic
       { location :: Location
-      , name     :: FunctionName  -- ^ marked @Intrinsic, but the compiler does not define it
+      , name     :: FunctionName  -- ^ not defined by the compiler
       }
    | SEIntrinsicArityMismatch
       { location      :: Location
       , name          :: FunctionName
-      , expectedArity :: Int  -- ^ the parameters of the compiler's definition
-      , actualArity   :: Int  -- ^ the parameters of the declaration
+      , expectedArity :: Int  -- ^ from the compiler's definition
+      , actualArity   :: Int  -- ^ from the declaration
       }
    deriving Show
 
@@ -246,11 +246,11 @@ data TypeCheckError
    | SEUnsatisfiedConstraint
       { location   :: Location
       , constraint :: TyIntrinsic  -- ^ what the type had to be, e.g. @number@
-      , origin     :: Location     -- ^ the expression whose signature requires it, e.g. an operator
+      , origin     :: Location     -- ^ where the constraint comes from, e.g. an operator
       , actual     :: Type
       }
    | SEAmbiguousConstraint
-      { location   :: Location     -- ^ the expression whose signature introduced the type
+      { location   :: Location     -- ^ where the constraint comes from
       , constraint :: TyIntrinsic
       }
    | SETooManyArgs

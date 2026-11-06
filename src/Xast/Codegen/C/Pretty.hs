@@ -182,9 +182,8 @@ prettyExpr = \case
    CConditional condition whenTrue whenFalse ->
       prettyOperand condition <+> "?" <+> prettyOperand whenTrue <+> ":" <+> prettyOperand whenFalse
 
--- | An expression inside another one, in parentheses when it is made of
---   operators, so the precedence of C operators never regroups it. Unary
---   operators bind tighter than all others and need none.
+-- | A subexpression, parenthesized if it has a binary operator.
+--   Unary operators bind tightest and need none.
 prettyOperand :: CExpr -> Doc ann
 prettyOperand expr
    | isCompound expr = enclose "(" ")" (prettyExpr expr)

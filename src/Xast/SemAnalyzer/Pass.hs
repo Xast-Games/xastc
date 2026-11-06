@@ -66,7 +66,7 @@ fullAnalysis reportWarnings saveFile programs target = do
       , intrinsics = collectIntrinsics programsDesugared symTable6
       }
 
--- | The extern functions marked @Intrinsic, which the compiler itself defines.
+-- | All @Intrinsic declarations, by extern id.
 collectIntrinsics :: [Program Desugared] -> SymTable -> M.Map ExternId IntrinsicDecl
 collectIntrinsics programs symTable = M.fromList
    [ (externId, intrinsicDecl program extern)

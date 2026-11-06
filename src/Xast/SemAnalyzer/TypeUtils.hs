@@ -81,9 +81,8 @@ compareListElems firstLoc firstTy otherLoc otherTy = do
       otherTy' <- resolve otherTy
       errSem (SEListElementTypeMismatch firstLoc firstTy' otherLoc otherTy')
 
--- | Runs a unification whose mismatch the caller reports in its own words, and
---   says whether there was one. An unsatisfied constraint is not a mismatch of
---   the two types, so it is still reported as it is.
+-- | Runs a unification silently and says whether the types mismatched, so the
+--   caller can report it its own way. Constraint errors are still reported.
 unifyMismatched :: SemAnalyzer () -> SemAnalyzer Bool
 unifyMismatched unification = do
    ((), reports) <- censor (filter isConstraintError) $ listen unification

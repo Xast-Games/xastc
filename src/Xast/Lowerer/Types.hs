@@ -14,8 +14,8 @@ data LowerState = LowerState
    , typeQueue  :: [TypeInst]
    , ctorSpans  :: M.Map ConstructorId Int
    , ctorFieldNames :: M.Map QualifiedIdent [FieldName]  -- ^ declared field names of each constructor
-   , intrinsics :: M.Map ExternId IntrinsicDecl  -- ^ extern functions the compiler defines itself
-   , intrinsicInsts :: M.Map TypeInst KirIntrinsicDef  -- ^ an intrinsic with the types it is used at
+   , intrinsics :: M.Map ExternId IntrinsicDecl  -- ^ @Intrinsic declarations
+   , intrinsicInsts :: M.Map TypeInst KirIntrinsicDef  -- ^ requested intrinsic instances
    }
 
 data TypeInst = TypeInst
@@ -55,8 +55,8 @@ data Kira = Kira
    }
    deriving Show
 
--- | One instance of an intrinsic, e.g. @opAdd@ on @Int@. The code generator
---   writes its body, so here it has only its signature.
+-- | An intrinsic instance, e.g. @opAdd@ on @Int@.
+--   Only a signature: codegen writes the body.
 data KirIntrinsicDef = KirIntrinsicDef
    { name      :: KirName       -- ^ e.g. @Std_Ops_opAdd_Std_Num_Int@
    , intrinsic :: FunctionName  -- ^ e.g. @opAdd@

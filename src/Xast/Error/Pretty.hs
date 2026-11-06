@@ -648,7 +648,7 @@ printWarning (SWDeadCode ident) =
 highlightModule :: Module -> String
 highlightModule = show . blue . show
 
--- | What a type must be to satisfy the constraint, as the end of a sentence.
+-- | E.g. "a number type".
 constraintDescription :: TyIntrinsic -> String
 constraintDescription TyNumber = "a number type"
 constraintDescription TyConcat = "a concatenative type"

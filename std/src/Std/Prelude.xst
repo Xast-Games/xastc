@@ -1,0 +1,14 @@
+module Std.Prelude exports {
+    -- Option
+    Option, Some, None,
+
+    -- Bool
+    Bool, True, False,
+
+    -- Function
+    id, const
+}
+
+use Std.Option *
+use Std.Bool *
+use Std.Function *

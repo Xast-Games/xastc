@@ -8,7 +8,7 @@ import Xast.Codegen.C.Types (EcsTag)
 data CCodegenEnv = CCodegenEnv
    { types      :: [KirTypeDef]
    , ecsTags    :: [EcsTag] 
-   , intrinsics :: [KirIntrinsicDef]  -- ^ every instance of an intrinsic the program uses
+   , intrinsics :: [KirIntrinsicDef]  -- ^ intrinsic instances the program uses
    }
    deriving Show
 

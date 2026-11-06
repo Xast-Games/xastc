@@ -57,17 +57,17 @@ lowerExpr env expr = case expr of
       "this expression form is not supported by the lowerer yet:\n" ++
       show unsupportedExpr
 
--- | The intrinsic a callee is, if it is an extern function marked @Intrinsic.
+-- | The callee's @Intrinsic declaration, if it has one.
 lookupIntrinsic :: Maybe Resolution -> Lowerer (Maybe IntrinsicDecl)
 lookupIntrinsic = \case
    Just (ResExternFunction externId) -> gets (M.lookup externId . (.intrinsics))
    _                                 -> pure Nothing
 
--- | The instance of an intrinsic that a fully applied call uses.
+-- | The instance name for a fully applied intrinsic call.
 intrinsicCallee
    :: IntrinsicDecl
-   -> Type           -- ^ the type of the callee at this use, e.g. @fn(Int, Int) -> Int@
-   -> Type           -- ^ the monomorphic result of the call
+   -> Type           -- ^ callee type here, e.g. @fn(Int, Int) -> Int@
+   -> Type           -- ^ monomorphic result type
    -> Lowerer KirName
 intrinsicCallee decl calleeType resultType = do
    when (isFunctionType resultType) $

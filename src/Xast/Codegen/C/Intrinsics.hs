@@ -11,19 +11,18 @@ import Xast.Utils.Generic (todo__, unreachableWith)
 
 -- | What the compiler knows of one intrinsic.
 data IntrinsicDefinition = IntrinsicDefinition
-   { arity :: Int                        -- ^ the number of parameters its declaration must have
-   , body  :: IntrinsicSite -> [CStmt]  -- ^ the body of its C function at one instance
+   { arity :: Int                        -- ^ required parameter count
+   , body  :: IntrinsicSite -> [CStmt]  -- ^ C function body for one instance
    }
 
--- | One instance of an intrinsic, e.g. @opAdd@ on @Int@, as its body sees it.
+-- | What a body is built from, e.g. for @opAdd@ on @Int@.
 data IntrinsicSite = IntrinsicSite
-   { params      :: [CExpr]  -- ^ the parameters of the C function, in order
+   { params      :: [CExpr]  -- ^ C function parameters
    , operandType :: Type     -- ^ the type of the first parameter, e.g. @Int@
    , resultType  :: Type     -- ^ e.g. @Bool@ for @opEq@
    }
 
--- | Every intrinsic the compiler defines. An extern function marked @Intrinsic
---   must be one of these, with as many parameters.
+-- | All intrinsics. Every @Intrinsic declaration must match one, including arity.
 intrinsicDefinitions :: M.Map FunctionName IntrinsicDefinition
 intrinsicDefinitions = M.fromList
    [ (Ident "opAdd",        binary (arithmetic Add))
@@ -48,7 +47,7 @@ intrinsicDefinitions = M.fromList
    , (Ident "opNot",        unary logicalNot)
    ]
 
--- | An intrinsic of two parameters whose body returns one expression of them.
+-- | Two parameters; the body returns one expression.
 binary :: (IntrinsicSite -> CExpr -> CExpr -> CExpr) -> IntrinsicDefinition
 binary operation = IntrinsicDefinition
    { arity = 2
@@ -57,7 +56,7 @@ binary operation = IntrinsicDefinition
       _             -> unreachableWith "a binary intrinsic instance without two parameters"
    }
 
--- | An intrinsic of one parameter whose body returns one expression of it.
+-- | One parameter; the body returns one expression.
 unary :: (IntrinsicSite -> CExpr -> CExpr) -> IntrinsicDefinition
 unary operation = IntrinsicDefinition
    { arity = 1
@@ -107,8 +106,8 @@ isIntegralType = \case
 floatingTypeNames :: [TypeName]
 floatingTypeNames = [Ident "Float", Ident "Double"]
 
--- | The Bool a C condition stands for. Bool is an enum whose first constructor
---   is @True@, so the int a C condition gives is not a Bool itself.
+-- | Converts a C condition to Bool. Bool is an enum with True = 0, so the
+--   condition's int can't be used directly.
 boolFromCondition
    :: Type   -- ^ the monomorphic Bool type, e.g. @Std_Bool_Bool@
    -> CExpr  -- ^ the C condition
@@ -123,7 +122,7 @@ boolFromCondition boolType condition = CConditional
 isTrue :: Type -> CExpr -> CExpr
 isTrue boolType value = CBinary Eq value (boolCtor boolType "True")
 
--- | A constructor of the Bool type, named as 'mangleCtor' names it, e.g. @Std_Bool_Bool_True@.
+-- | A mangled Bool constructor, e.g. @Std_Bool_Bool_True@.
 boolCtor
    :: Type  -- ^ the monomorphic Bool type
    -> Text  -- ^ the constructor's own name

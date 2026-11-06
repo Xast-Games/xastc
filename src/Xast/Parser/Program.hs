@@ -3,7 +3,7 @@ module Xast.Parser.Program where
 
 import Data.Bifunctor (Bifunctor(first))
 import Data.Text (Text)
-import Text.Megaparsec (MonadParsec (lookAhead, eof), some, many, (<|>), runParser)
+import Text.Megaparsec (MonadParsec (lookAhead, eof), many, (<|>), runParser)
 
 import Xast.Parser.Type (typeDef)
 import Xast.Parser.Function (func)
@@ -25,7 +25,8 @@ program :: Parser (Text -> Program Parsed)
 program = do
    progModuleDef  <- moduleDef
    progImports    <- many importDef
-   progStmts      <- some stmt
+   -- may be empty, e.g. a prelude that only re-exports
+   progStmts      <- many stmt
 
    return $ Program progModuleDef progImports progStmts
 

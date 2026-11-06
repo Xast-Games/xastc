@@ -34,15 +34,14 @@ data SymTable = SymTable
    , externIdSupply  :: Int
    , tyVarSupply     :: Int
    , tySubst         :: M.Map Int Type
-   , tyVarConstraints :: M.Map Int TyVarConstraint  -- ^ type variables that may stand only for some types
+   , tyVarConstraints :: M.Map Int TyVarConstraint  -- ^ constrained type variables
    }
    deriving (Eq, Show)
 
--- | What a type variable introduced for a @number@ or @concatenative@ of a
---   signature may stand for, e.g. the operands of @opAdd@.
+-- | A type variable limited to @number@ or @concatenative@ types.
 data TyVarConstraint = TyVarConstraint
    { kind   :: TyIntrinsic
-   , origin :: Location  -- ^ the expression whose signature introduced the variable
+   , origin :: Location  -- ^ the expression that introduced it
    }
    deriving (Eq, Show)
 
@@ -68,12 +67,12 @@ data QualifiedName = QualifiedName
 
 data ModuleInfo = ModuleInfo
    { symbols :: M.Map Ident SymbolInfo
-   , exports :: S.Set Ident
+   , exports :: M.Map Ident Module  -- ^ exported name → declaring module
    }
    deriving (Eq, Show)
 
 emptyModuleInfo :: ModuleInfo
-emptyModuleInfo = ModuleInfo M.empty S.empty
+emptyModuleInfo = ModuleInfo M.empty M.empty
 
 data SymbolInfo
    = SymbolType

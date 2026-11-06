@@ -66,11 +66,11 @@ requestType instance' = gets (M.lookup instance' . (.typeInsts)) >>= \case
          }
       pure kirName
 
--- | The instance of an intrinsic at the types of one use, named like a type
---   instance: @opAdd@ of @Std.Ops@ on @Int@ is @Std_Ops_opAdd_Std_Num_Int@.
+-- | Requests an intrinsic instance for the types of one use.
+--   Named like type instances, e.g. @Std_Ops_opAdd_Std_Num_Int@.
 requestIntrinsic
    :: IntrinsicDecl
-   -> Type  -- ^ the type of the intrinsic at this use, e.g. @fn(Int, Int) -> Int@
+   -> Type  -- ^ type at this use, e.g. @fn(Int, Int) -> Int@
    -> Lowerer KirName
 requestIntrinsic decl usedType = do
    let declaredType = TyFn decl.args decl.retType
@@ -93,9 +93,8 @@ requestIntrinsic decl usedType = do
          modify $ \state -> state { intrinsicInsts = M.insert instance' definition state.intrinsicInsts }
          pure definition.name
 
--- | What each type parameter of a signature stands for at one use of it. The
---   parameters are its generics and its @number@ or @concatenative@, each
---   keyed by the type it is written as, so they come out in a fixed order.
+-- | Maps each generic, @number@ and @concatenative@ of a signature to its type
+--   at one use. Keyed by the declared type, so the order is stable.
 bindTypeParams
    :: Type  -- ^ as declared, e.g. @fn(number, number) -> Bool@
    -> Type  -- ^ as used, e.g. @fn(Int, Int) -> Bool@

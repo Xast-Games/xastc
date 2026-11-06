@@ -1,0 +1,7 @@
+module Std.Function exports *
+
+fn id (a) -> a;
+fn id x = x;
+
+fn const (a, b) -> a;
+fn const x _ = x;

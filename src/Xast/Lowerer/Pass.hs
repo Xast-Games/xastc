@@ -13,7 +13,7 @@ import Xast.Lowerer.Definition (lowerFunction, lowerSystem)
 
 lowerPrograms
    :: M.Map ConstructorId Int
-   -> M.Map ExternId IntrinsicDecl  -- ^ extern functions marked @Intrinsic
+   -> M.Map ExternId IntrinsicDecl  -- ^ @Intrinsic declarations
    -> [Program Desugared]
    -> ([Kira], [KirTypeDef], [KirIntrinsicDef])
 lowerPrograms spans intrinsics programs =

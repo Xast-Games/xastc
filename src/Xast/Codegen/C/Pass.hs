@@ -48,8 +48,8 @@ codegenTypeDefs = do
             | isEnum td        -> codegenEnum td
             | otherwise        -> codegenADT td
 
-   -- Intrinsics come after the types, as comparisons return a Bool. Every
-   -- module includes this header, so they are static inline.
+   -- After the types, since comparisons return Bool.
+   -- static inline, as every module includes this header.
    let intrinsicFunctions = env.intrinsics |> map (CFunc . codegenIntrinsic)
 
    return CProgram 
@@ -221,9 +221,8 @@ codegenInstruct = \case
    KirMatch { ty = matchType, scrutinee = scrutinee, arms = arms, fallback = fallback, dest = dest, exhaustive = exhaustive } ->
       codegenMatch matchType scrutinee arms fallback dest exhaustive
 
--- | The C function of one instance of an intrinsic, e.g.
---   @static inline int32_t Std_Ops_opAdd_Std_Num_Int(int32_t _a0, int32_t _a1) { return _a0 + _a1; }@,
---   whose body comes from 'intrinsicDefinitions'.
+-- | A static inline C function for one intrinsic instance.
+--   The body comes from 'intrinsicDefinitions'.
 codegenIntrinsic :: KirIntrinsicDef -> CFunction
 codegenIntrinsic instance' =
    let paramNames = zipWith (\index _ -> intrinsicParamName index) [0 ..] instance'.params

@@ -575,8 +575,7 @@ data TyIntrinsic
    | TyConcat
    deriving (Eq, Ord, Show)
 
--- | An extern function marked @Intrinsic: the compiler defines it itself,
---   once for each set of types it is used at.
+-- | An @Intrinsic extern function. The compiler defines it per type instance.
 data IntrinsicDecl = IntrinsicDecl
    { name    :: QualifiedIdent  -- ^ e.g. @Std.Ops.opAdd@
    , args    :: [Type]          -- ^ as declared, e.g. @(number, number)@
@@ -584,19 +583,18 @@ data IntrinsicDecl = IntrinsicDecl
    }
    deriving (Eq, Show)
 
--- | Named types a @number@ may stand for: the numeric types of @Std.Num@ and
---   the floating-point types of literals.
+-- | Types allowed for @number@.
 numberTypeNames :: [TypeName]
 numberTypeNames = map Ident
    [ "Size", "USize", "Long", "ULong", "Int", "UInt"
    , "Short", "UShort", "Byte", "UByte", "Float", "Double"
    ]
 
--- | The type of text, which a @concatenative@ may stand for.
+-- | Allowed for @concatenative@.
 stringTypeName :: TypeName
 stringTypeName = Ident "String"
 
--- | The type of lists, which a @concatenative@ may stand for with any element type.
+-- | Allowed for @concatenative@, with any element type.
 listTypeName :: TypeName
 listTypeName = Ident "List"
 

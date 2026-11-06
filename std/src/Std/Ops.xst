@@ -17,7 +17,7 @@ extern fn opDiv (number, number) -> number;
 @Intrinsic
 extern fn opMod (number, number) -> number;
 
-@Intrinsic
+-- @Intrinsic
 extern fn opPow(number, number) -> number;
 
 @Intrinsic
@@ -47,10 +47,10 @@ extern fn opOr (Bool, Bool) -> Bool;
 @Intrinsic
 extern fn opNot (Bool) -> Bool;
 
-@Intrinsic
+-- @Intrinsic
 extern fn opPipe (a, fn(a) -> b) -> b;
 
-@Intrinsic
+-- @Intrinsic
 extern fn opConcat (concatenative, concatenative) -> concatenative;
 
 @Intrinsic

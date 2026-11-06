@@ -20,6 +20,7 @@ tests = TestList
    [ TestLabel "Accepted programs"    acceptedTests
    , TestLabel "Declarations"         declarationTests
    , TestLabel "Imports"              importTests
+   , TestLabel "Re-exports"           reexportTests
    , TestLabel "Name resolution"      nameResolutionTests
    , TestLabel "Type checking"        typeCheckingTests
    , TestLabel "Intrinsic constraints" constraintTests
@@ -255,6 +256,126 @@ importTests = TestList
          , "use A2 as M"
          , "fn f (Int) -> Int;"
          , "fn f x = M.inc x;"
+         ]
+      ]
+   ]
+
+reexportTests :: Test
+reexportTests = TestList
+   [ named "re-exported function" $ assertAnalyzes
+      [ moduleWithInc "A"
+      , moduleSource
+         [ "module P exports { Int, inc }"
+         , "use A *"
+         ]
+      , moduleSource
+         [ "module C exports *"
+         , "use P *"
+         , "fn f (Int) -> Int;"
+         , "fn f x = inc x;"
+         ]
+      ]
+
+   , named "re-exported type is the type of its declaring module" $ assertAnalyzes
+      [ moduleWithBox "A"
+      , moduleSource
+         [ "module P exports { Box }"
+         , "use A { Box }"
+         ]
+      , moduleSource
+         [ "module C exports *"
+         , "use P { Box }"
+         , "use A { openBox }"
+         , "fn f (Box) -> Box;"
+         , "fn f b = openBox b;"
+         ]
+      ]
+
+   , named "one symbol imported through two modules is not ambiguous" $ assertAnalyzes
+      [ moduleWithBox "A"
+      , moduleSource
+         [ "module P exports { Box }"
+         , "use A { Box }"
+         ]
+      , moduleSource
+         [ "module C exports *"
+         , "use P *"
+         , "use A *"
+         , "fn f (Box) -> Box;"
+         , "fn f b = openBox b;"
+         ]
+      ]
+
+   , named "re-exported constructors" $ assertAnalyzes
+      [ moduleSource
+         [ "module A exports *"
+         , "type Shape = Circle | Square;"
+         ]
+      , moduleSource
+         [ "module P exports { Shape, Circle, Square }"
+         , "use A *"
+         ]
+      , moduleSource
+         [ "module C exports *"
+         , "use P *"
+         , "fn f (Shape) -> Shape;"
+         , "fn f Circle = Square;"
+         , "fn f Square = Circle;"
+         ]
+      ]
+
+   , named "chain of re-exports, listed before the modules they come from" $ assertAnalyzes
+      [ moduleSource
+         [ "module C exports *"
+         , "use Q *"
+         , "fn f (Int) -> Int;"
+         , "fn f x = inc x;"
+         ]
+      , moduleSource
+         [ "module Q exports { Int, inc }"
+         , "use P *"
+         ]
+      , moduleSource
+         [ "module P exports { Int, inc }"
+         , "use A *"
+         ]
+      , moduleWithInc "A"
+      ]
+
+   , named "re-exported function through a module alias" $ assertAnalyzes
+      [ moduleWithInc "A"
+      , moduleSource
+         [ "module P exports { Int, inc }"
+         , "use A *"
+         ]
+      , moduleSource
+         [ "module C exports *"
+         , "use P { Int }"
+         , "use P as M"
+         , "fn f (Int) -> Int;"
+         , "fn f x = M.inc x;"
+         ]
+      ]
+
+   , named "exports * does not re-export imports" $ assertRejected isMissingImports
+      [ moduleWithInc "A"
+      , moduleSource
+         [ "module P exports *"
+         , "use A *"
+         , "extern type Z;"
+         ]
+      , moduleSource
+         [ "module C exports *"
+         , "use P { inc }"
+         , "extern type Y;"
+         ]
+      ]
+
+   , named "re-exporting a name that is not imported" $ assertRejected isInvalidExport
+      [ moduleWithInc "A"
+      , moduleSource
+         [ "module P exports { inc }"
+         , "extern type Z;"
          ]
       ]
    ]

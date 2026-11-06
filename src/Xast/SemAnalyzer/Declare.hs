@@ -128,8 +128,7 @@ checkTagType typeDef =
    in when (isTag && not (isPlainMarker typeDef)) $
          errSem invalidTag
 
--- | An extern function marked @Intrinsic must be one the compiler defines,
---   declared with as many parameters as the compiler's definition has.
+-- | An @Intrinsic declaration must match a compiler definition, including arity.
 checkIntrinsic :: ExternFunc -> SemAnalyzer ()
 checkIntrinsic extern =
    let isIntrinsic = ExtFnMod ModIntrinsic `elem` extern.modifiers

@@ -30,9 +30,9 @@ freshTyVarId = do
    put currentState { tyVarSupply = nextId + 1 }
    return nextId
 
--- | A fresh type variable that may only stand for types of the given kind.
+-- | A fresh type variable limited to the given kind.
 freshConstrainedVar
-   :: Location     -- ^ the expression whose signature introduces the variable
+   :: Location     -- ^ the expression that introduces it
    -> TyIntrinsic
    -> SemAnalyzer Type
 freshConstrainedVar origin kind = do
@@ -67,8 +67,7 @@ generalize ty = do
       varType <- resolve varInfo.ty
       pure (freeTyVars varType S.\\ S.fromList varInfo.quantified)
 
-   -- A constrained variable is never generalized: each use of a generalized
-   -- variable may pick its own type, but `number` must end up as one concrete type.
+   -- Constrained variables stay monomorphic: each needs one concrete type.
    constrained <- gets (M.keysSet . (.tyVarConstraints))
    return $ S.toList (freeTyVars resolvedType S.\\ envFree S.\\ constrained)
 
@@ -180,8 +179,8 @@ bindOrFail location varId boundType = do
          checkConstraint location varId boundType
          bindVar varId boundType
 
--- | Reports binding a constrained type variable to a type it may not stand for.
---   A variable bound to another variable hands its constraint over to it.
+-- | Checks a binding against the variable's constraint.
+--   Binding to another variable passes the constraint on.
 checkConstraint :: Location -> Int -> Type -> SemAnalyzer ()
 checkConstraint location varId boundType = lookupConstraint varId >>= \case
    Nothing -> pure ()
@@ -190,8 +189,8 @@ checkConstraint location varId boundType = lookupConstraint varId >>= \case
       _ -> unless (satisfiesConstraint constraint.kind boundType) $
          errSem (unsatisfiedConstraint location constraint boundType)
 
--- | Constrains a variable that another, constrained variable is bound to.
---   Both constraints must then hold, and no type is both a number and concatenative.
+-- | Passes a constraint to another variable. Two different constraints
+--   conflict: no type is both a number and concatenative.
 passConstraint :: Location -> TyVarConstraint -> Int -> SemAnalyzer ()
 passConstraint location constraint otherId = lookupConstraint otherId >>= \case
    Nothing -> constrainVar otherId constraint
@@ -206,10 +205,10 @@ unsatisfiedConstraint location constraint actual = SEUnsatisfiedConstraint
    , actual     = actual
    }
 
--- | Whether a type, which is not a type variable, may be what a constrained variable stands for.
+-- | Whether a non-variable type satisfies the constraint.
 satisfiesConstraint :: TyIntrinsic -> Type -> Bool
 satisfiesConstraint kind type' = case (kind, type') of
-   -- a `number` of a signature in Std stands for whichever number its caller picks
+   -- `number` in a Std signature satisfies itself
    (_, TyInt other)                  -> other == kind
    (_, TyInvalid)                    -> True
    (TyNumber, TyCon qualified)       -> qualified.name `elem` numberTypeNames
@@ -217,8 +216,8 @@ satisfiesConstraint kind type' = case (kind, type') of
    (TyConcat, TyApp (TyCon list) _)  -> list.name == listTypeName
    _                                 -> False
 
--- | Reports every constrained type variable that no use fixed to a type, as
---   an addition of some number cannot be compiled. Run after type checking.
+-- | Reports constrained variables that never got a concrete type.
+--   Run after type checking.
 reportAmbiguousConstraints :: SemAnalyzer ()
 reportAmbiguousConstraints = do
    constraints <- gets (M.toList . (.tyVarConstraints))
@@ -229,7 +228,7 @@ reportAmbiguousConstraints = do
    forM_ byOrigin $ \constraint ->
       errSem SEAmbiguousConstraint { location = constraint.origin, constraint = constraint.kind }
 
--- | A type variable that is bound to nothing, not even to another variable.
+-- | Whether a type variable is unbound.
 isUnresolvedVar :: Int -> SemAnalyzer Bool
 isUnresolvedVar varId = do
    resolved <- resolve (TyVar varId)
@@ -245,9 +244,8 @@ occursCheckType varId t = do
       TyFn args ret    -> ((||) . or <$> mapM (occursCheckType varId) args) <*> occursCheckType varId ret
       _                -> pure False
 
--- | The type of one use of a function: every generic gets a fresh type variable,
---   and so does every intrinsic kind. All the @number@s of one signature are the
---   same type, as in @opAdd (number, number) -> number@.
+-- | Instantiates a signature: one fresh variable per generic and per intrinsic
+--   kind, so all @number@s in a signature are the same type.
 instantiate
    :: Location  -- ^ the expression that uses the function
    -> FuncSig
