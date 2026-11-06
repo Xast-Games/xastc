@@ -51,18 +51,68 @@ codegenTypeDefs = do
       } 
 
 codegenStruct :: KirTypeDef -> [CDecl]
-codegenStruct td = 
+codegenStruct td =
    let name = td.name.text
-       fields = (head td.ctors).fields
-         |> map (\(KirFieldDef fieldName ty) -> (fieldName.inner, typeToCType ty))
+       fields = fieldsToC (head td.ctors).fields
 
    in [CStructDef CStructDefinition {..}]
 
 codegenEnum :: KirTypeDef -> [CDecl]
-codegenEnum td = []
+codegenEnum td =
+   let name = td.name.text
+       variants = td.ctors
+         |> map (\ctor -> ctor.name.inner)
+
+   in [CEnumDef CEnumDefinition {..}]
 
 codegenADT :: KirTypeDef -> [CDecl]
-codegenADT td = []
+codegenADT td =
+   let tagName = tagEnumName td.name
+       tagEnum = CEnumDef CEnumDefinition
+         { name     = tagName
+         , variants = td.ctors |> map (\ctor -> ctor.name.inner)
+         }
+       payloadCtors = td.ctors |> filter carriesData
+       payloadStructs = payloadCtors |> map codegenPayload
+       unionMembers = L.forEach payloadCtors $ \ctor ->
+         (unionMemberName td.name ctor.name, CStruct (payloadStructName ctor.name))
+       taggedUnion = CTaggedUnionDef CTaggedUnionDefinition
+         { name       = td.name.text
+         , tagType    = CStruct tagName
+         , unionTypes = unionMembers
+         }
+
+   in tagEnum : payloadStructs ++ [taggedUnion]
+
+codegenPayload :: KirCtor -> CDecl
+codegenPayload ctor = CStructDef CStructDefinition
+   { name   = payloadStructName ctor.name
+   , fields = fieldsToC ctor.fields
+   }
+
+fieldsToC :: [KirFieldDef] -> [(Text, CType)]
+fieldsToC fields = fields
+   |> map (\field -> (field.name.inner, typeToCType field.ty))
+
+-- | A constructor without fields is only a tag: it has no payload struct and no union member.
+carriesData :: KirCtor -> Bool
+carriesData ctor = not (null ctor.fields)
+
+tagEnumName :: KirName -> Text
+tagEnumName typeName = typeName.text <> "_Tag"
+
+payloadStructName :: CtorName -> Text
+payloadStructName ctorName = ctorName.inner <> "_Payload"
+
+-- | The constructor's own name, without the type prefix 'mangleCtor' gave it:
+--   the union is already scoped to the type, so @Main_Shape_Circle@ is just @Circle@.
+unionMemberName
+   :: KirName   -- ^ the tagged union's type, e.g. @Main_Shape@
+   -> CtorName  -- ^ the mangled constructor, e.g. @Main_Shape_Circle@
+   -> Text
+unionMemberName typeName ctorName =
+   let typePrefix = typeName.text <> "_"
+   in fromMaybe ctorName.inner (T.stripPrefix typePrefix ctorName.inner)
 
 codegenOne :: Kira -> CCodegen CProgram
 codegenOne kira = do

@@ -55,9 +55,10 @@ declareStmt = \case
 
    _ -> return ()
 
-type RedeclarationError = (Ident -> Location -> Location -> SemError)
+-- | Builds the error reported when a name is declared twice.
+type MakeRedeclarationError = Ident -> Location -> Location -> RedeclarationError
 
-declareSymbol :: Ident -> SymbolInfo -> RedeclarationError -> SemAnalyzer ()
+declareSymbol :: Ident -> SymbolInfo -> MakeRedeclarationError -> SemAnalyzer ()
 declareSymbol ident symbol redeclarationError = do
    QualifiedName moduleName _ <- qualify ident
    symTable <- get

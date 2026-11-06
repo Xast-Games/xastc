@@ -38,6 +38,16 @@ instance PrintError XastError where
       let diagnostic = addReport mempty report
       printDiagnostic stdout WithUnicode (TabSize 4) defaultStyle diagnostic
 
+   printError (XastModuleNameMismatch { location = loc, expected = expected, declared = declared }) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ("Module " <> show (blue (show declared)) <> " is declared in the file of module " <> show (blue (show expected)))
+            [ (toPosition pos len filename, This ("Expected `module " <> show expected <> "`")) ]
+            [ Hint ("A module is named after its path under src/: rename it to `" <> show expected <> "` or move the file to " <> moduleToPath declared ".xst") ]
+
+      in printReportAt filename report
+
    printError (XastTomlDecodeError file e) = do
       let msg = pack (show (yellow (file <> ": "))) <> prettyTomlDecodeError e
       let report = Err Nothing msg [] []
@@ -55,6 +65,16 @@ instance PrintError (ParseErrorBundle Text Void) where
 
 instance PrintError SemError where
    printError :: SemError -> IO ()
+   printError (SEImportError details) = printError details
+   printError (SERedeclarationError details) = printError details
+   printError (SEModifierError details) = printError details
+   printError (SEShadowingError details) = printError details
+   printError (SEUndefinedError details) = printError details
+   printError (SEDefinitionError details) = printError details
+   printError (SETypeCheckError details) = printError details
+
+instance PrintError ImportError where
+   printError :: ImportError -> IO ()
    printError (SESelfImportError module_ from to) =
       let Location fromPos _ fromLen = from
           Location toPos _ toLen = to
@@ -89,18 +109,6 @@ instance PrintError SemError where
 
       in printReportAt filename report
 
-   printError (SEInvalidExport module_ loc ids) =
-      let Location pos _ len = loc
-          filename = sourceName pos
-          report = errReport
-            ( "Invalid exported symbols in module " <> highlightModule module_ <> ": " 
-               <> show (green (intercalate ", " (map show ids)))
-            )
-            [(toPosition pos len filename, This "This export is invalid")]
-            []
-
-      in printReportAt filename report
-
    printError (SEMissingImports module_ loc ids) =
       let Location pos _ len = loc
           filename = sourceName pos
@@ -123,6 +131,18 @@ instance PrintError SemError where
             )
             [(toPosition pos len filename, This "This import contains private symbols")]
             [Hint ("Add " <> imports <> " to the list of exported symbols of module " <> show (blue (bold (show module_))))]
+
+      in printReportAt filename report
+
+   printError (SEInvalidExport module_ loc ids) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ( "Invalid exported symbols in module " <> highlightModule module_ <> ": " 
+               <> show (green (intercalate ", " (map show ids)))
+            )
+            [(toPosition pos len filename, This "This export is invalid")]
+            []
 
       in printReportAt filename report
 
@@ -165,6 +185,23 @@ instance PrintError SemError where
 
       in printReportAt filename report
 
+instance PrintError RedeclarationError where
+   printError :: RedeclarationError -> IO ()
+   printError (SETypeRedeclaration ident oldLoc newLoc) =
+      redeclarationError "Type" ident oldLoc newLoc
+
+   printError (SEFnRedeclaration ident oldLoc newLoc) =
+      redeclarationError "Function" ident oldLoc newLoc
+
+   printError (SEExternFnRedeclaration ident oldLoc newLoc) =
+      redeclarationError "Extern function" ident oldLoc newLoc
+
+   printError (SEExternTypeRedeclaration ident oldLoc newLoc) =
+      redeclarationError "Extern type" ident oldLoc newLoc
+
+   printError (SESystemRedeclaration ident oldLoc newLoc) =
+      redeclarationError "System" ident oldLoc newLoc
+
    printError (SECtorRedeclaration ident oldLoc newLoc) =
       let Location posOld _ lenOld = oldLoc
           Location posNew _ lenNew = newLoc
@@ -178,6 +215,28 @@ instance PrintError SemError where
 
       in printReportAt filename report
 
+instance PrintError ModifierError where
+   printError :: ModifierError -> IO ()
+   printError (SEInvalidTagType loc typeName) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ("Type " <> show (blue (show typeName)) <> " cannot be a @Tag")
+            [ (toPosition pos len filename, This "Tag type must be a plain marker") ]
+            [ Hint ("A tag has no type parameters and a single constructor without fields, e.g. `@Tag type " <> show typeName <> " = " <> show typeName <> ";`") ]
+
+      in printReportAt filename report
+
+instance PrintError ShadowingError where
+   printError :: ShadowingError -> IO ()
+   printError (SEDuplicateBinding ident oldLoc newLoc) =
+      redeclarationError "Binding" ident oldLoc newLoc
+
+   printError (SEShadowedBinding ident outerLoc newLoc) =
+      shadowingError ident outerLoc newLoc
+
+instance PrintError UndefinedError where
+   printError :: UndefinedError -> IO ()
    printError (SEUndefinedVar loc ident) =
       let Location pos _ len = loc
           filename = sourceName pos
@@ -208,82 +267,6 @@ instance PrintError SemError where
 
       in printReportAt filename report
 
-   printError (SEFnArityMismatch loc ident expected actual) =
-      let Location pos _ len = loc
-          filename = sourceName pos
-          report = errReport
-            ( "Function `" <> show ident <> "` expects " <> show expected
-               <> " argument(s), but got " <> show actual
-            )
-            [ (toPosition pos len filename, This "Called/implemented with the wrong number of arguments") ]
-            []
-
-      in printReportAt filename report
-
-   printError (SESystemArityMismatch loc ident expected actual) =
-      let Location pos _ len = loc
-          filename = sourceName pos
-          report = errReport
-            ( "System `" <> show ident <> "` expects " <> show expected
-               <> " pattern(s) here, but got " <> show actual
-            )
-            [ (toPosition pos len filename, This "Wrong number of patterns") ]
-            []
-
-      in printReportAt filename report
-
-   printError (SEUnknownField loc con fld) =
-      let Location pos _ len = loc
-          filename = sourceName pos
-          report = errReport
-            ("Constructor " <> show (blue (show con)) <> " has no field: " <> show (blue (show fld)))
-            [ (toPosition pos len filename, This "Unknown field") ]
-            []
-
-      in printReportAt filename report
-
-   printError (SENotARecordType loc ty) =
-      let Location pos _ len = loc
-          filename = sourceName pos
-          report = errReport
-            ("Cannot access fields on non-record type: " <> show ty)
-            [ (toPosition pos len filename, This "Not a record type") ]
-            []
-
-      in printReportAt filename report
-
-   printError (SEAmbiguousRecordAccess loc conIdent otherCtors) =
-      let Location pos _ len = loc
-          filename = sourceName pos
-          othersList = intercalate ", " (map show otherCtors)
-          report = errReport
-            ("Cannot access/update fields of " <> show (blue (show conIdent)) <> ": its type has other constructors too (" <> othersList <> ")")
-            [ (toPosition pos len filename, This "Ambiguous field access on a multi-constructor type") ]
-            [ Hint "Field getters and record update syntax only work when the record variant is the only constructor of its type. Pattern-match instead to pick out the fields for this variant." ]
-
-      in printReportAt filename report
-
-   printError (SEInvalidTupleIndex loc ty idx) =
-      let Location pos _ len = loc
-          filename = sourceName pos
-          report = errReport
-            ("Invalid tuple index " <> show idx <> " on type: " <> show ty)
-            [ (toPosition pos len filename, This "Invalid tuple index") ]
-            []
-
-      in printReportAt filename report
-
-   printError (SENonExhaustiveMatch loc tyIdent missingCtors) =
-      let Location pos _ len = loc
-          filename = sourceName pos
-          missingList = intercalate ", " (map show missingCtors)
-          report = errReport
-            ("Non-exhaustive match on " <> show (blue (show tyIdent)) <> ": missing " <> missingList)
-            [ (toPosition pos len filename, This "Not every constructor is covered here") ]
-            [ Hint "Add arms for the missing constructors, add a wildcard/variable arm, or mark the type @NonExhaustive." ]
-
-      in printReportAt filename report
-
    printError (SEUndefinedAlias filename alias) =
       let report = errReport
             ("Undefined module alias: " <> show (blue (show alias)))
@@ -292,37 +275,8 @@ instance PrintError SemError where
 
       in printReportAt filename report
 
-   printError (SETypeRedeclaration ident oldLoc newLoc) =
-      redeclarationError "Type" ident oldLoc newLoc
-
-   printError (SEInvalidTagType loc typeName) =
-      let Location pos _ len = loc
-          filename = sourceName pos
-          report = errReport
-            ("Type " <> show (blue (show typeName)) <> " cannot be a @Tag")
-            [ (toPosition pos len filename, This "Tag type must be a plain marker") ]
-            [ Hint ("A tag has no type parameters and a single constructor without fields, e.g. `@Tag type " <> show typeName <> " = " <> show typeName <> ";`") ]
-
-      in printReportAt filename report
-
-   printError (SEFnRedeclaration ident oldLoc newLoc) =
-      redeclarationError "Function" ident oldLoc newLoc
-
-   printError (SEExternFnRedeclaration ident oldLoc newLoc) =
-      redeclarationError "Extern function" ident oldLoc newLoc
-
-   printError (SEExternTypeRedeclaration ident oldLoc newLoc) =
-      redeclarationError "Extern type" ident oldLoc newLoc
-
-   printError (SESystemRedeclaration ident oldLoc newLoc) =
-      redeclarationError "System" ident oldLoc newLoc
-
-   printError (SEDuplicateBinding ident oldLoc newLoc) =
-      redeclarationError "Binding" ident oldLoc newLoc
-
-   printError (SEShadowedBinding ident outerLoc newLoc) =
-      shadowingError ident outerLoc newLoc
-
+instance PrintError DefinitionError where
+   printError :: DefinitionError -> IO ()
    printError (SEMissingFnDef loc ident) =
       let Location pos _ len = loc
           filename = sourceName pos
@@ -384,6 +338,24 @@ instance PrintError SemError where
             ("System `" <> show ident <> "` is declared but never implemented")
             [(toPosition pos len filename, This "Declared here but never implemented")]
             [Hint "Add an implementation for this system"]
+
+      in printReportAt filename report
+
+instance PrintError TypeCheckError where
+   printError :: TypeCheckError -> IO ()
+   printError (SEIntegerOutOfBounds loc kind value (low, high)) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ( "`" <> show kind <> "` integer literal value `" <> show value <> "` is out of bounds " )
+            [ ( toPosition pos len filename
+             , This 
+               ( "This value is of type `" <> show kind <> "` and its bounds are "
+               <> show low <> ".." <> show high
+               )
+              )
+            ]
+            []
 
       in printReportAt filename report
 
@@ -466,20 +438,80 @@ instance PrintError SemError where
             []
 
       in printReportAt filename report
-   
-   printError (SEIntegerOutOfBounds loc kind value (low, high)) =
+
+   printError (SEFnArityMismatch loc ident expected actual) =
       let Location pos _ len = loc
           filename = sourceName pos
           report = errReport
-            ( "`" <> show kind <> "` integer literal value `" <> show value <> "` is out of bounds " )
-            [ ( toPosition pos len filename
-             , This 
-               ( "This value is of type `" <> show kind <> "` and its bounds are "
-               <> show low <> ".." <> show high
-               )
-              )
-            ]
+            ( "Function `" <> show ident <> "` expects " <> show expected
+               <> " argument(s), but got " <> show actual
+            )
+            [ (toPosition pos len filename, This "Called/implemented with the wrong number of arguments") ]
             []
+
+      in printReportAt filename report
+
+   printError (SESystemArityMismatch loc ident expected actual) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ( "System `" <> show ident <> "` expects " <> show expected
+               <> " pattern(s) here, but got " <> show actual
+            )
+            [ (toPosition pos len filename, This "Wrong number of patterns") ]
+            []
+
+      in printReportAt filename report
+
+   printError (SEUnknownField loc con fld) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ("Constructor " <> show (blue (show con)) <> " has no field: " <> show (blue (show fld)))
+            [ (toPosition pos len filename, This "Unknown field") ]
+            []
+
+      in printReportAt filename report
+
+   printError (SENotARecordType loc ty) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ("Cannot access fields on non-record type: " <> show ty)
+            [ (toPosition pos len filename, This "Not a record type") ]
+            []
+
+      in printReportAt filename report
+
+   printError (SEAmbiguousRecordAccess loc conIdent otherCtors) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          othersList = intercalate ", " (map show otherCtors)
+          report = errReport
+            ("Cannot access/update fields of " <> show (blue (show conIdent)) <> ": its type has other constructors too (" <> othersList <> ")")
+            [ (toPosition pos len filename, This "Ambiguous field access on a multi-constructor type") ]
+            [ Hint "Field getters and record update syntax only work when the record variant is the only constructor of its type. Pattern-match instead to pick out the fields for this variant." ]
+
+      in printReportAt filename report
+
+   printError (SEInvalidTupleIndex loc ty idx) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ("Invalid tuple index " <> show idx <> " on type: " <> show ty)
+            [ (toPosition pos len filename, This "Invalid tuple index") ]
+            []
+
+      in printReportAt filename report
+
+   printError (SENonExhaustiveMatch loc tyIdent missingCtors) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          missingList = intercalate ", " (map show missingCtors)
+          report = errReport
+            ("Non-exhaustive match on " <> show (blue (show tyIdent)) <> ": missing " <> missingList)
+            [ (toPosition pos len filename, This "Not every constructor is covered here") ]
+            [ Hint "Add arms for the missing constructors, add a wildcard/variable arm, or mark the type @NonExhaustive." ]
 
       in printReportAt filename report
 

@@ -35,19 +35,19 @@ runCompile dir = runCompile_ dir >>= \case
       forM_ err printError
 
       putStrLn
-         (  show (red (bold ("Compilation failed with " :: String)))
+         (  show (red (bold "Compilation failed with "))
          ++ show (yellow (bold (show len)))
-         ++ show (red (bold (" errors." :: String)))
+         ++ show (red (bold " errors."))
          )
 
    Right 0 ->
-      print $ green $ bold ("Compilation completed." :: String)
+      print $ green $ bold "Compilation completed."
 
    Right warnings ->
       putStrLn
-         (  show (green (bold ("Compilation completed " :: String)))
+         (  show (green (bold "Compilation completed "))
          ++ show (yellow (bold ("with " <> show warnings <> " warnings")))
-         ++ show (green (bold ("." :: String)))
+         ++ show (green (bold "."))
          )
 
 runCompile_ :: Maybe FilePath -> IO (Either [XastError] Int)
@@ -127,4 +127,23 @@ parseOne :: FilePath -> Module -> IO (Either XastError (Program Parsed))
 parseOne currentDir module_ = runExceptT $ do
    let filepath = currentDir ++ "/" ++ moduleToPath module_ ".xst"
    code <- liftIO $ readFile filepath
-   ExceptT $ pure $ parseProgram filepath (pack code)
+   program <- ExceptT $ pure $ parseProgram filepath (pack code)
+   checkModuleName module_ program
+   pure program
+
+-- | A module must be declared in the file its name points to,
+--   e.g. module @MyModule.MyUtils@ in @src/MyModule/MyUtils.xst@.
+checkModuleName
+   :: Monad m
+   => Module          -- ^ the module the file was loaded for
+   -> Program Parsed
+   -> ExceptT XastError m ()
+checkModuleName expected program =
+   let declared = program.moduleDef.name
+       mismatch = XastModuleNameMismatch
+         { location = program.moduleDef.location
+         , expected = expected
+         , declared = declared
+         }
+   in unless (declared == expected) $
+         throwError mismatch

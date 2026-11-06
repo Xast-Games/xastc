@@ -2,29 +2,42 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Xast.Codegen.C.Pretty where
 
-import Xast.Lowerer.Types (KirName(..))
-import Xast.Codegen.C.Types
-import Prettyprinter (Doc, Pretty (pretty), hardline, (<+>), encloseSep, vsep, indent, enclose)
-import Xast.Utils.Pretty (bold, cyan)
 import Data.List (intercalate)
 import Data.Text (Text)
+import Prettyprinter
+
 import qualified Xast.Utils.List as L
+import Xast.Utils.Pretty (bold, cyan)
+import Xast.Lowerer.Types (KirName(..))
+import Xast.Codegen.C.Types
+import Xast.Codegen.C.Pass (typeDefsFilename)
 
 debugPrograms :: [CProgram] -> String
-debugPrograms programs = intercalate "\n\n" $ L.forEach programs $ \program ->
-   let path = show $ bold $ cyan program.path
-       code = show $ prettyProgram program
-   in path ++ ":\n" ++ code
+debugPrograms programs = intercalate "\n\n" $ 
+   L.forEach programs $ \program ->
+      let path = show $ bold $ cyan program.path
+          code = show $ prettyProgram program
+      in path ++ ":\n" ++ code
 
 header :: Doc ann
 header = 
-   "#include <stdint.h>" <> hardline 
-   -- <> "#include <flecs.h>" <> hardline <> hardline
+   "#include <stdint.h>" <> hardline <>
+   "#include <flecs.h>" <> hardline
+
+includeTypes :: Doc ann
+includeTypes = 
+   "#include \"" <> pretty typeDefsFilename <> "\"" <> hardline
 
 prettyProgram :: CProgram -> Doc ann
 prettyProgram program = 
-   header <>
-   foldMap prettyDecl program.declarations
+   let typeHeader = 
+         if program.path /= typeDefsFilename then
+            includeTypes
+         else
+            mempty
+   in header 
+   <> typeHeader
+   <> foldMap prettyDecl program.declarations
 
 prettyDecl :: CDecl -> Doc ann
 prettyDecl (CFunc func) = prettyFunction func <> hardline
@@ -43,21 +56,20 @@ prettyTaggedUnionDef taggedUnion =
    vsep
       [ "{"
       , indent 4 (prettyType taggedUnion.tagType <+> "tag;")
-      , hardline
       , indent 4 (prettyUnion taggedUnion.unionTypes)
       , "}"
       ] <+>
    pretty taggedUnion.name <> ";"
 
 prettyUnion :: [(Text, CType)] -> Doc ann
-prettyUnion unionTypes = 
+prettyUnion unionTypes =
    "union" <+>
    vsep
       [ "{"
       , indent 4 (vsep (map prettyField unionTypes))
       , "}"
       ] <+>
-   "data;"
+   "as;"
 
 prettyEnumDef :: CEnumDefinition -> Doc ann
 prettyEnumDef enum = 

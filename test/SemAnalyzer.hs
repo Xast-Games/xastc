@@ -14,8 +14,6 @@ import Xast.Parser.Program (parseProgram)
 import Xast.SemAnalyzer.Pass (fullAnalysis)
 import Xast.SemAnalyzer.Types (AnalysisResult)
 import Xast.Utils.Compiler (Target (Target64))
-import Data.Maybe (isJust, fromJust)
-import Xast.Utils.Generic ((|>))
 
 tests :: Test
 tests = TestList
@@ -504,60 +502,60 @@ moduleWithBox moduleName = moduleSource
 -- Error kinds ---------------------------------------------------------------
 
 isSelfImport, isCyclicImport, isMissingModule, isMissingImports, isPrivateImports :: SemError -> Bool
-isSelfImport = \case { SESelfImportError {} -> True; _ -> False }
-isCyclicImport = \case { SECyclicImportError {} -> True; _ -> False }
-isMissingModule = \case { SEMissingModule {} -> True; _ -> False }
-isMissingImports = \case { SEMissingImports {} -> True; _ -> False }
-isPrivateImports = \case { SEPrivateImports {} -> True; _ -> False }
+isSelfImport = \case { SEImportError (SESelfImportError {}) -> True; _ -> False }
+isCyclicImport = \case { SEImportError (SECyclicImportError {}) -> True; _ -> False }
+isMissingModule = \case { SEImportError (SEMissingModule {}) -> True; _ -> False }
+isMissingImports = \case { SEImportError (SEMissingImports {}) -> True; _ -> False }
+isPrivateImports = \case { SEImportError (SEPrivateImports {}) -> True; _ -> False }
 
 isInvalidExport, isAmbiguousAlias, isAmbiguousImport, isImportDeclConflict :: SemError -> Bool
-isInvalidExport = \case { SEInvalidExport {} -> True; _ -> False }
-isAmbiguousAlias = \case { SEAmbiguousAlias {} -> True; _ -> False }
-isAmbiguousImport = \case { SEAmbiguousImport {} -> True; _ -> False }
-isImportDeclConflict = \case { SEImportDeclConflict {} -> True; _ -> False }
+isInvalidExport = \case { SEImportError (SEInvalidExport {}) -> True; _ -> False }
+isAmbiguousAlias = \case { SEImportError (SEAmbiguousAlias {}) -> True; _ -> False }
+isAmbiguousImport = \case { SEImportError (SEAmbiguousImport {}) -> True; _ -> False }
+isImportDeclConflict = \case { SEImportError (SEImportDeclConflict {}) -> True; _ -> False }
 
 isTypeRedeclaration, isFnRedeclaration, isExternFnRedeclaration, isExternTypeRedeclaration :: SemError -> Bool
-isTypeRedeclaration = \case { SETypeRedeclaration {} -> True; _ -> False }
-isFnRedeclaration = \case { SEFnRedeclaration {} -> True; _ -> False }
-isExternFnRedeclaration = \case { SEExternFnRedeclaration {} -> True; _ -> False }
-isExternTypeRedeclaration = \case { SEExternTypeRedeclaration {} -> True; _ -> False }
+isTypeRedeclaration = \case { SERedeclarationError (SETypeRedeclaration {}) -> True; _ -> False }
+isFnRedeclaration = \case { SERedeclarationError (SEFnRedeclaration {}) -> True; _ -> False }
+isExternFnRedeclaration = \case { SERedeclarationError (SEExternFnRedeclaration {}) -> True; _ -> False }
+isExternTypeRedeclaration = \case { SERedeclarationError (SEExternTypeRedeclaration {}) -> True; _ -> False }
 
 isInvalidTagType :: SemError -> Bool
-isInvalidTagType = \case { SEInvalidTagType {} -> True; _ -> False }
+isInvalidTagType = \case { SEModifierError (SEInvalidTagType {}) -> True; _ -> False }
 
 isSystemRedeclaration, isCtorRedeclaration, isDuplicateBinding, isShadowedBinding :: SemError -> Bool
-isSystemRedeclaration = \case { SESystemRedeclaration {} -> True; _ -> False }
-isCtorRedeclaration = \case { SECtorRedeclaration {} -> True; _ -> False }
-isDuplicateBinding = \case { SEDuplicateBinding {} -> True; _ -> False }
-isShadowedBinding = \case { SEShadowedBinding {} -> True; _ -> False }
+isSystemRedeclaration = \case { SERedeclarationError (SESystemRedeclaration {}) -> True; _ -> False }
+isCtorRedeclaration = \case { SERedeclarationError (SECtorRedeclaration {}) -> True; _ -> False }
+isDuplicateBinding = \case { SEShadowingError (SEDuplicateBinding {}) -> True; _ -> False }
+isShadowedBinding = \case { SEShadowingError (SEShadowedBinding {}) -> True; _ -> False }
 
 isUndefinedVar, isUndefinedCon, isUndefinedType, isUndefinedAlias :: SemError -> Bool
-isUndefinedVar = \case { SEUndefinedVar {} -> True; _ -> False }
-isUndefinedCon = \case { SEUndefinedCon {} -> True; _ -> False }
-isUndefinedType = \case { SEUndefinedType {} -> True; _ -> False }
-isUndefinedAlias = \case { SEUndefinedAlias {} -> True; _ -> False }
+isUndefinedVar = \case { SEUndefinedError (SEUndefinedVar {}) -> True; _ -> False }
+isUndefinedCon = \case { SEUndefinedError (SEUndefinedCon {}) -> True; _ -> False }
+isUndefinedType = \case { SEUndefinedError (SEUndefinedType {}) -> True; _ -> False }
+isUndefinedAlias = \case { SEUndefinedError (SEUndefinedAlias {}) -> True; _ -> False }
 
 isMissingFnDef, isMissingFnImpls, isMissingSystemDef, isMissingSystemImpls :: SemError -> Bool
-isMissingFnDef = \case { SEMissingFnDef {} -> True; _ -> False }
-isMissingFnImpls = \case { SEMissingFnImpls {} -> True; _ -> False }
-isMissingSystemDef = \case { SEMissingSystemDef {} -> True; _ -> False }
-isMissingSystemImpls = \case { SEMissingSystemImpls {} -> True; _ -> False }
+isMissingFnDef = \case { SEDefinitionError (SEMissingFnDef {}) -> True; _ -> False }
+isMissingFnImpls = \case { SEDefinitionError (SEMissingFnImpls {}) -> True; _ -> False }
+isMissingSystemDef = \case { SEDefinitionError (SEMissingSystemDef {}) -> True; _ -> False }
+isMissingSystemImpls = \case { SEDefinitionError (SEMissingSystemImpls {}) -> True; _ -> False }
 
 isIntegerOutOfBounds, isTypeError, isListElementTypeMismatch, isThenElseTypeMismatch :: SemError -> Bool
-isIntegerOutOfBounds = \case { SEIntegerOutOfBounds {} -> True; _ -> False }
-isTypeError = \case { SETypeError {} -> True; _ -> False }
-isListElementTypeMismatch = \case { SEListElementTypeMismatch {} -> True; _ -> False }
-isThenElseTypeMismatch = \case { SEThenElseTypeMismatch {} -> True; _ -> False }
+isIntegerOutOfBounds = \case { SETypeCheckError (SEIntegerOutOfBounds {}) -> True; _ -> False }
+isTypeError = \case { SETypeCheckError (SETypeError {}) -> True; _ -> False }
+isListElementTypeMismatch = \case { SETypeCheckError (SEListElementTypeMismatch {}) -> True; _ -> False }
+isThenElseTypeMismatch = \case { SETypeCheckError (SEThenElseTypeMismatch {}) -> True; _ -> False }
 
 isInfiniteType, isNotAFunction, isCtorArityMismatch, isFnArityMismatch, isSystemArityMismatch :: SemError -> Bool
-isInfiniteType = \case { SEInfiniteType {} -> True; _ -> False }
-isNotAFunction = \case { SENotAFunction {} -> True; _ -> False }
-isCtorArityMismatch = \case { SECtorArityMismatch {} -> True; _ -> False }
-isFnArityMismatch = \case { SEFnArityMismatch {} -> True; _ -> False }
-isSystemArityMismatch = \case { SESystemArityMismatch {} -> True; _ -> False }
+isInfiniteType = \case { SETypeCheckError (SEInfiniteType {}) -> True; _ -> False }
+isNotAFunction = \case { SETypeCheckError (SENotAFunction {}) -> True; _ -> False }
+isCtorArityMismatch = \case { SETypeCheckError (SECtorArityMismatch {}) -> True; _ -> False }
+isFnArityMismatch = \case { SETypeCheckError (SEFnArityMismatch {}) -> True; _ -> False }
+isSystemArityMismatch = \case { SETypeCheckError (SESystemArityMismatch {}) -> True; _ -> False }
 
 isUnknownField, isNotARecordType, isInvalidTupleIndex, isNonExhaustiveMatch :: SemError -> Bool
-isUnknownField = \case { SEUnknownField {} -> True; _ -> False }
-isNotARecordType = \case { SENotARecordType {} -> True; _ -> False }
-isInvalidTupleIndex = \case { SEInvalidTupleIndex {} -> True; _ -> False }
-isNonExhaustiveMatch = \case { SENonExhaustiveMatch {} -> True; _ -> False }
+isUnknownField = \case { SETypeCheckError (SEUnknownField {}) -> True; _ -> False }
+isNotARecordType = \case { SETypeCheckError (SENotARecordType {}) -> True; _ -> False }
+isInvalidTupleIndex = \case { SETypeCheckError (SEInvalidTupleIndex {}) -> True; _ -> False }
+isNonExhaustiveMatch = \case { SETypeCheckError (SENonExhaustiveMatch {}) -> True; _ -> False }

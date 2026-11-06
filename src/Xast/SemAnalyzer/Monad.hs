@@ -38,8 +38,8 @@ runPhase env symTable phase =
       then Right (result, symTable', warnings)
       else Left errors
 
-errSem :: SemError -> SemAnalyzer ()
-errSem err = tell [SemError err]
+errSem :: ToSemError a => a -> SemAnalyzer ()
+errSem err = tell [SemError (toSemError err)]
 
 warnSem :: SemWarning -> SemAnalyzer ()
 warnSem warn = tell [SemWarning warn]

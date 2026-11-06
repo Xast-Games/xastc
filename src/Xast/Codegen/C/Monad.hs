@@ -9,6 +9,7 @@ data CCodegenEnv = CCodegenEnv
    { types   :: [KirTypeDef]
    , ecsTags :: [EcsTag] 
    }
+   deriving Show
 
 type CCodegen =
    ReaderT CCodegenEnv

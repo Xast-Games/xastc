@@ -2,7 +2,7 @@
 name    = "XastTest"
 version = "0.1.0"
 author  = "Koncepto Sociala"
-modules = ["Test"]
+modules = ["Main"]
 
 [api]
 labels = ["Setup", "Render", "Update"]

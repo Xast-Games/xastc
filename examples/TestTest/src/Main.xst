@@ -1,4 +1,4 @@
-module Test exports *
+module Main exports *
 
 extern type Int;
 extern type Byte;
@@ -14,6 +14,19 @@ extern fn opNeg(a) -> a;
 -- system Clamp0To100 #(Int) -> Int;
 -- system Clamp0To100 100   = 0;
 -- system Clamp0To100 other = other + 1;
+
+type Tuple = Tuple Bool Int;
+
+type Record = Record {
+    int: Int,
+    bool: Bool,
+};
+
+fn s (Record) -> Record; 
+fn s x = x;
+
+fn gg (Tuple) -> Tuple; 
+fn gg x = x;
 
 @Tag
 type Unit = Unit;

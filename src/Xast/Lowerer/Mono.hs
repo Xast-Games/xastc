@@ -156,15 +156,19 @@ asTypeModifier = \case
    TypeMod m -> m
    _ -> error "Cannot extract non-type modifier as type"
 
--- | Name of a constructor once its type has been instantiated.
+-- | Name of a constructor once its type has been instantiated: the name of that
+--   type instance followed by the constructor's own name (@A Int@, @B@ -> @Main_A_Int_B@),
+--   so it never clashes with its type or with constructors of other instances.
 mangleCtor
    :: Type      -- ^ the constructor's result type, e.g. @A Int@
    -> CtorName  -- ^ the constructor's own name, e.g. @B@
    -> CtorName
-mangleCtor resultType ctorName =
-   let (_, typeArgs) = splitApp resultType
-       ctorInstance = TypeInst { name = qualifiedCtor resultType ctorName, args = typeArgs }
-   in Ident (mangle ctorInstance)
+mangleCtor resultType ctorName = case splitApp resultType of
+   (TyCon typeName, typeArgs) ->
+      let typeInstance = TypeInst { name = typeName, args = typeArgs }
+          mangledText = mangle typeInstance <> "_" <> ctorName.inner
+      in Ident mangledText
+   _ -> ctorName
 
 -- | A constructor qualified with the module of its type, which also declares it.
 qualifiedCtor
