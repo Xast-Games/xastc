@@ -349,7 +349,14 @@ data XastError
       , declared :: Module    -- ^ the module the header names
       }
    | XastStdNotFound
-      { directory :: FilePath  -- ^ where Std was looked for
+      { directories :: [FilePath]  -- ^ where Std was looked for
+      }
+   | XastCompilerNotFound
+      { compiler :: String  -- ^ e.g. @gcc@
+      }
+   | XastGeneratedCodeRejected
+      { compiler        :: String
+      , outputDirectory :: FilePath
       }
    | XastPackageCycle
       { packages :: [PackageName]  -- ^ the cycle, first package repeated at the end

@@ -48,10 +48,20 @@ instance PrintError XastError where
 
       in printReportAt filename report
 
-   printError (XastStdNotFound dir) =
+   printError (XastStdNotFound directories) =
       printMessage
-         ("Std not found: no xast.toml in " <> dir)
-         [ Hint "Put std next to the xastc binary, or set XAST_STD to its directory" ]
+         ("Std not found, looked in: " <> intercalate ", " directories)
+         [ Hint "Install it with scripts/install.sh, or pass --std DIR / set XAST_STD" ]
+
+   printError (XastCompilerNotFound compiler) =
+      printMessage
+         ("C compiler `" <> compiler <> "` not found")
+         [ Hint "Pass another one with --cc, or skip the check with --no-cc" ]
+
+   printError (XastGeneratedCodeRejected compiler outputDirectory) =
+      printMessage
+         ("`" <> compiler <> "` rejected the generated C in " <> outputDirectory <> " (see its output above)")
+         [ Hint "If flecs.h is missing, pass --flecs DIR or set XAST_FLECS" ]
 
    printError (XastPackageCycle packages) =
       let path = intercalate " -> " (map unpack packages)

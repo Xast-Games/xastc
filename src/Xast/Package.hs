@@ -6,9 +6,9 @@ import Control.Monad.Except
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Either (partitionEithers)
 import Data.Text (pack)
-import Data.Maybe (fromMaybe)
+import Control.Applicative ((<|>))
 import qualified Data.Map as M
-import System.Directory (doesFileExist)
+import System.Directory (XdgDirectory (XdgData), canonicalizePath, doesFileExist, getXdgDirectory)
 import System.Environment (getExecutablePath, lookupEnv)
 import System.FilePath ((</>), takeDirectory)
 import qualified Toml
@@ -38,23 +38,44 @@ preludeImport prog = Located
 -- | The project and every package it depends on, dependencies first.
 --   Every package except std depends on std.
 loadPackages
-   :: FilePath  -- ^ the project
+   :: Maybe FilePath  -- ^ Std's directory, if given on the command line
+   -> FilePath        -- ^ the project
    -> ExceptT [XastError] IO [Package]
-loadPackages projectDirectory = do
+loadPackages stdOverride projectDirectory = do
    project <- loadPackage projectDirectory
-   stdDirectory <- liftIO findStd
-   stdExists <- liftIO $ doesFileExist (stdDirectory </> "xast.toml")
-   unless (stdExists || project.name == stdPackageName) $
-      throwError [XastStdNotFound stdDirectory]
-   visitPackage stdDirectory [] [] project
+   candidates <- liftIO (stdCandidates stdOverride)
+   found <- liftIO (filterM hasPackageConfig candidates)
+   case found of
+      stdDirectory : _ -> visitPackage stdDirectory [] [] project
+      [] | project.name == stdPackageName -> visitPackage projectDirectory [] [] project
+         | otherwise -> throwError [XastStdNotFound candidates]
 
--- | Std's directory: @XAST_STD@ if set, otherwise @std@ next to the xastc binary.
-findStd :: IO FilePath
-findStd = do
-   override <- lookupEnv "XAST_STD"
-   executable <- getExecutablePath
-   let besideBinary = takeDirectory executable </> "std"
-   pure (fromMaybe besideBinary override)
+-- | Where Std may be. @--std@ or @XAST_STD@ is the only place when given;
+--   otherwise, e.g. for @/usr/local/bin/xastc@:
+--
+--   > /usr/local/share/xastc/std   -- installed with the binary
+--   > /usr/local/bin/std           -- next to the binary
+--   > ~/.local/share/xastc/std     -- per user (the platform's data directory)
+stdCandidates :: Maybe FilePath -> IO [FilePath]
+stdCandidates stdOverride = do
+   fromEnvironment <- lookupEnv "XAST_STD"
+   case stdOverride <|> fromEnvironment of
+      Just chosen -> pure [chosen]
+      Nothing     -> defaultStdDirectories
+
+defaultStdDirectories :: IO [FilePath]
+defaultStdDirectories = do
+   binDirectory <- takeDirectory <$> (getExecutablePath >>= canonicalizePath)
+   userData <- getXdgDirectory XdgData ("xastc" </> "std")
+   let installPrefix = takeDirectory binDirectory
+   pure
+      [ installPrefix </> "share" </> "xastc" </> "std"
+      , binDirectory </> "std"
+      , userData
+      ]
+
+hasPackageConfig :: FilePath -> IO Bool
+hasPackageConfig directory = doesFileExist (directory </> "xast.toml")
 
 -- | Adds a package after its dependencies.
 visitPackage
