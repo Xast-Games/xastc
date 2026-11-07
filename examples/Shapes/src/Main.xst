@@ -1,7 +1,7 @@
 module Main exports *
 
 use Geometry *
-use Std.Option { isSome }
+use Std.Option as Option
 
 fn totalCorners (Shape, Shape) -> Int;
 fn totalCorners first second = corners first + corners second;
@@ -21,4 +21,4 @@ fn cornersOr shape fallback = match shape with
     _          -> fallback;
 
 fn hasShape (Option Shape) -> Bool;
-fn hasShape shape = isSome shape;
+fn hasShape shape = Option.isSome shape;

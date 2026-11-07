@@ -1,0 +1,40 @@
+{
+  "name": "xast-syntax",
+  "displayName": "Xast",
+  "description": "Syntax highlighting for the Xast language",
+  "version": "0.2.0",
+  "publisher": "xast",
+  "license": "Unlicense",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "xast",
+        "aliases": [
+          "Xast",
+          "xast"
+        ],
+        "extensions": [
+          ".xst"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "xast",
+        "scopeName": "source.xast",
+        "path": "./syntaxes/xast.tmLanguage.json"
+      }
+    ]
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:xast"
+  ]
+}

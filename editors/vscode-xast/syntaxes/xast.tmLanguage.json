@@ -1,0 +1,430 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Xast",
+  "scopeName": "source.xast",
+  "fileTypes": [
+    "xst"
+  ],
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#module-header"
+    },
+    {
+      "include": "#use"
+    },
+    {
+      "include": "#modifier"
+    },
+    {
+      "include": "#extern-type"
+    },
+    {
+      "include": "#signature"
+    },
+    {
+      "include": "#system-signature"
+    },
+    {
+      "include": "#type-definition"
+    },
+    {
+      "include": "#function-head"
+    },
+    {
+      "include": "#system-head"
+    },
+    {
+      "include": "#expression"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.documentation.xast",
+          "match": "--\\|.*$"
+        },
+        {
+          "name": "comment.line.double-dash.xast",
+          "match": "--.*$"
+        }
+      ]
+    },
+    "module-header": {
+      "match": "\\b(module)\\s+([A-Z][A-Za-z0-9_']*(?:\\.[A-Z][A-Za-z0-9_']*)*)\\s+(exports)\\b",
+      "captures": {
+        "1": {
+          "name": "keyword.other.module.xast"
+        },
+        "2": {
+          "name": "entity.name.namespace.xast entity.name.type.module.xast"
+        },
+        "3": {
+          "name": "keyword.other.exports.xast"
+        }
+      }
+    },
+    "use": {
+      "match": "\\b(use)\\s+([A-Z][A-Za-z0-9_']*(?:\\.[A-Z][A-Za-z0-9_']*)*)(?:\\s+(as)\\s+([A-Z][A-Za-z0-9_']*))?",
+      "captures": {
+        "1": {
+          "name": "keyword.other.import.xast"
+        },
+        "2": {
+          "name": "entity.name.namespace.xast entity.name.type.module.xast"
+        },
+        "3": {
+          "name": "keyword.other.as.xast"
+        },
+        "4": {
+          "name": "entity.name.namespace.xast entity.name.type.module.xast"
+        }
+      }
+    },
+    "modifier": {
+      "match": "(@)([A-Z][A-Za-z0-9_']*)",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.annotation.xast"
+        },
+        "2": {
+          "name": "storage.type.annotation.xast"
+        }
+      }
+    },
+    "extern-type": {
+      "match": "\\b(extern)\\s+(type)\\s+([A-Z][A-Za-z0-9_']*)",
+      "captures": {
+        "1": {
+          "name": "storage.modifier.extern.xast"
+        },
+        "2": {
+          "name": "storage.type.type.xast"
+        },
+        "3": {
+          "name": "entity.name.type.xast"
+        }
+      }
+    },
+    "signature": {
+      "comment": "fn name (Types) -> Type;  \u2014 a declaration: an arrow comes before any '='",
+      "begin": "\\b(?:(extern)\\s+)?(fn)\\s+([a-z_][A-Za-z0-9_']*)(?=[^=]*->)",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.modifier.extern.xast"
+        },
+        "2": {
+          "name": "storage.type.function.xast"
+        },
+        "3": {
+          "name": "entity.name.function.xast"
+        }
+      },
+      "end": ";",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.terminator.xast"
+        }
+      },
+      "name": "meta.function.signature.xast",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#type-expression"
+        }
+      ]
+    },
+    "system-signature": {
+      "begin": "\\b(system)\\s+([A-Z][A-Za-z0-9_']*)(?=[^=]*->)",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.type.system.xast"
+        },
+        "2": {
+          "name": "entity.name.function.system.xast"
+        }
+      },
+      "end": ";",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.terminator.xast"
+        }
+      },
+      "name": "meta.system.signature.xast",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "name": "keyword.other.xast",
+          "match": "\\b(with|event|res)\\b"
+        },
+        {
+          "include": "#type-expression"
+        }
+      ]
+    },
+    "type-definition": {
+      "begin": "\\b(type)\\s+([A-Z][A-Za-z0-9_']*)",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.type.type.xast"
+        },
+        "2": {
+          "name": "entity.name.type.xast"
+        }
+      },
+      "end": ";",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.terminator.xast"
+        }
+      },
+      "name": "meta.type.definition.xast",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "comment": "= Ctor | Ctor",
+          "match": "([=|])\\s*([A-Z][A-Za-z0-9_']*)",
+          "captures": {
+            "1": {
+              "name": "keyword.operator.xast"
+            },
+            "2": {
+              "name": "constant.other.constructor.xast"
+            }
+          }
+        },
+        {
+          "comment": "record field: name : Type",
+          "match": "\\b([a-z_][A-Za-z0-9_']*)\\s*(:)",
+          "captures": {
+            "1": {
+              "name": "variable.other.member.xast"
+            },
+            "2": {
+              "name": "keyword.operator.type.xast"
+            }
+          }
+        },
+        {
+          "include": "#type-expression"
+        }
+      ]
+    },
+    "type-expression": {
+      "patterns": [
+        {
+          "name": "support.type.primitive.xast",
+          "match": "\\b(number|concatenative)\\b"
+        },
+        {
+          "name": "storage.type.function.xast",
+          "match": "\\bfn\\b"
+        },
+        {
+          "name": "keyword.operator.arrow.xast",
+          "match": "->"
+        },
+        {
+          "match": "\\b([A-Z][A-Za-z0-9_']*)(\\.)(?=[A-Z])",
+          "captures": {
+            "1": {
+              "name": "entity.name.namespace.xast entity.name.type.module.xast"
+            },
+            "2": {
+              "name": "punctuation.accessor.xast"
+            }
+          }
+        },
+        {
+          "name": "storage.type.xast",
+          "match": "\\b[A-Z][A-Za-z0-9_']*"
+        },
+        {
+          "name": "variable.other.generic-type.xast entity.name.type.parameter.xast",
+          "match": "\\b[a-z_][A-Za-z0-9_']*"
+        },
+        {
+          "name": "punctuation.section.entity.xast",
+          "match": "#\\("
+        },
+        {
+          "include": "#punctuation"
+        }
+      ]
+    },
+    "function-head": {
+      "match": "\\b(fn)\\s+([a-z_][A-Za-z0-9_']*)",
+      "captures": {
+        "1": {
+          "name": "storage.type.function.xast"
+        },
+        "2": {
+          "name": "entity.name.function.xast"
+        }
+      }
+    },
+    "system-head": {
+      "match": "\\b(system)\\s+([A-Z][A-Za-z0-9_']*)",
+      "captures": {
+        "1": {
+          "name": "storage.type.system.xast"
+        },
+        "2": {
+          "name": "entity.name.function.system.xast"
+        }
+      }
+    },
+    "expression": {
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#literals"
+        },
+        {
+          "name": "keyword.control.xast",
+          "match": "\\b(if|then|else|match|with|let|in)\\b"
+        },
+        {
+          "name": "keyword.other.xast",
+          "match": "\\b(extern|event|res|as)\\b"
+        },
+        {
+          "name": "constant.language.boolean.xast",
+          "match": "\\b(True|False)\\b"
+        },
+        {
+          "comment": "Alias.name or Alias.Ctor",
+          "match": "\\b([A-Z][A-Za-z0-9_']*)(\\.)(?=[A-Za-z_])",
+          "captures": {
+            "1": {
+              "name": "entity.name.namespace.xast entity.name.type.module.xast"
+            },
+            "2": {
+              "name": "punctuation.accessor.xast"
+            }
+          }
+        },
+        {
+          "name": "constant.other.constructor.xast",
+          "match": "\\b[A-Z][A-Za-z0-9_']*"
+        },
+        {
+          "comment": "field access: point.x, pair.0",
+          "match": "(?<=[A-Za-z0-9_')\\]])(\\.)([a-z_][A-Za-z0-9_']*|\\d+)",
+          "captures": {
+            "1": {
+              "name": "punctuation.accessor.xast"
+            },
+            "2": {
+              "name": "variable.other.member.xast"
+            }
+          }
+        },
+        {
+          "name": "variable.language.wildcard.xast",
+          "match": "(?<![A-Za-z0-9_'])_(?![A-Za-z0-9_'])"
+        },
+        {
+          "name": "keyword.operator.lambda.xast",
+          "match": "\\.\\\\"
+        },
+        {
+          "name": "punctuation.section.entity.xast",
+          "match": "#\\("
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#punctuation"
+        }
+      ]
+    },
+    "literals": {
+      "patterns": [
+        {
+          "name": "constant.numeric.float.xast",
+          "match": "\\b\\d+\\.\\d+(?:[eE][+-]?\\d+)?[fF]?\\b"
+        },
+        {
+          "name": "constant.numeric.hex.xast",
+          "match": "\\b0x[0-9A-Fa-f]+(?:_(?i:uz|ul|us|ub|u|z|l|s|b))?\\b"
+        },
+        {
+          "name": "constant.numeric.binary.xast",
+          "match": "\\b0b[01]+(?i:uz|ul|us|ub|u|z|l|s|b)?\\b"
+        },
+        {
+          "name": "constant.numeric.octal.xast",
+          "match": "\\b0o[0-7]+(?i:uz|ul|us|ub|u|z|l|s|b)?\\b"
+        },
+        {
+          "name": "constant.numeric.integer.xast",
+          "match": "\\b\\d+(?i:uz|ul|us|ub|u|z|l|s|b)?\\b"
+        },
+        {
+          "name": "string.quoted.double.xast",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "name": "constant.character.escape.xast",
+              "match": "\\\\."
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.xast",
+          "match": "'(?:\\\\.|[^'\\\\])'"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.xast",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.pipe.xast",
+          "match": "\\|>|<\\|"
+        },
+        {
+          "name": "keyword.operator.xast",
+          "match": "<>|==|!=|<=|>=|&&|\\|\\||<<|>>|\\*\\*|[+\\-*/%<>!&|^]"
+        },
+        {
+          "name": "keyword.operator.assignment.xast",
+          "match": "="
+        },
+        {
+          "name": "keyword.operator.type.xast",
+          "match": ":"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.terminator.xast",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.separator.comma.xast",
+          "match": ","
+        }
+      ]
+    }
+  }
+}
