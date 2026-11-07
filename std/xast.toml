@@ -5,13 +5,18 @@ author  = "Xast Platform"
 modules = [
     "Std.Alloc",
     "Std.Bool",
+    "Std.BoolUtils",
+    "Std.Char",
     "Std.Error",
+    "Std.Function",
     "Std.Num",
     "Std.Ops",
     "Std.Option",
     "Std.OptionResult",
+    "Std.Prelude",
     "Std.Result",
     "Std.String",
+    "Std.Trace",
 ]
 
 [api]

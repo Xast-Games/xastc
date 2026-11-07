@@ -2,13 +2,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Avoid lambda using `infix`" #-}
 module Xast.Codegen.C.Pass where
 
 import Control.Monad.Identity (Identity(runIdentity))
 import Control.Monad.Reader (MonadReader(ask))
 import Control.Monad (forM)
 import Data.Text (Text)
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, mapMaybe, maybeToList, listToMaybe)
 import qualified Data.Text as T
 
 import Xast.AST
@@ -18,6 +20,7 @@ import Xast.Codegen.C.Types
 import Xast.Codegen.C.Monad (CCodegen, runCodegen, CCodegenEnv (..))
 import qualified Xast.Utils.List as L
 import qualified Data.Map as M
+import Data.Graph (stronglyConnComp, flattenSCCs)
 import Xast.Codegen.C.Intrinsics (IntrinsicDefinition (..), IntrinsicSite (..), intrinsicDefinitions)
 
 codegen 
@@ -30,7 +33,8 @@ codegen kira typeDefs ecsTags intrinsicDefs =
    let env = CCodegenEnv typeDefs ecsTags intrinsicDefs
        generated = do
          types    <- codegenTypeDefs
-         programs <- forM kira codegenOne
+         let definedIn = functionModules kira
+         programs <- forM kira (codegenOne definedIn)
          return (types : programs)
    in runIdentity (runCodegen generated env)
 
@@ -43,7 +47,7 @@ codegenTypeDefs = do
 
    let tagDeclarations = env.ecsTags |> map CTagDef
    let typeDeclarations = 
-         L.forFlat env.types $ \td -> if
+         L.forFlat (inDependencyOrder env.types) $ \td -> if
             | isPlainStruct td -> codegenStruct td
             | isEnum td        -> codegenEnum td
             | otherwise        -> codegenADT td
@@ -54,8 +58,32 @@ codegenTypeDefs = do
 
    return CProgram 
       { path = typeDefsFilename
+      , includes = []
       , declarations = tagDeclarations ++ typeDeclarations ++ intrinsicFunctions
       } 
+
+-- | Type definitions with every type after the types of its fields, as C needs.
+--   E.g. for
+--
+--   > type C = ...;
+--   > type E = ...;
+--   > type A = B C | D E | F;
+--
+--   @C@ and @E@ come before @A@, whatever order they were requested in.
+inDependencyOrder :: [KirTypeDef] -> [KirTypeDef]
+inDependencyOrder typeDefs = typeDefs
+   |> map (\typeDef -> (typeDef, typeDef.name, fieldTypeNames typeDef))
+   |> stronglyConnComp
+   |> flattenSCCs
+
+-- | E.g. @[C, E]@ for @type A = B C | D E | F;@
+fieldTypeNames :: KirTypeDef -> [KirName]
+fieldTypeNames typeDef =
+   [ KirName qualified.name.inner
+   | ctor <- typeDef.ctors
+   , field <- ctor.fields
+   , TyCon qualified <- [field.ty]
+   ]
 
 codegenStruct :: KirTypeDef -> [CDecl]
 codegenStruct td =
@@ -121,15 +149,51 @@ unionMemberName typeName ctorName =
    let typePrefix = typeName.text <> "_"
    in fromMaybe ctorName.inner (T.stripPrefix typePrefix ctorName.inner)
 
-codegenOne :: Kira -> CCodegen CProgram
-codegenOne kira = do
+codegenOne :: M.Map KirName Module -> Kira -> CCodegen CProgram
+codegenOne definedIn kira = do
    systemFns <- forM kira.systems codegenSystem
    pureFns <- forM kira.functions codegenFn
 
-   let declarations = map CFunc (systemFns ++ pureFns)
-   let path = moduleToPath kira.moduleName ".h"
+   -- Prototypes first, so functions may call each other in any order
+   let functions = systemFns ++ pureFns
+   let declarations = map CFuncPrototype functions ++ map CFunc functions
+   let path = moduleHeader kira.moduleName
+   let includes = calledModuleHeaders definedIn kira
 
    return CProgram {..}
+
+-- | The module of every function and system.
+functionModules :: [Kira] -> M.Map KirName Module
+functionModules kira = M.fromList
+   [ (name, program.moduleName)
+   | program <- kira
+   , name <- map (.name) program.functions ++ map (.name) program.systems
+   ]
+
+-- | Headers of the other modules whose functions a module calls,
+--   e.g. @["src/Geometry.h"]@ for @Main@ calling @corners@ of @Geometry@.
+calledModuleHeaders :: M.Map KirName Module -> Kira -> [FilePath]
+calledModuleHeaders definedIn kira =
+   let bodies = map (.body) kira.functions ++ map (.body) kira.systems
+   in bodies
+      |> concatMap (\body -> callees body.instructs)
+      |> mapMaybe (`M.lookup` definedIn)
+      |> filter (/= kira.moduleName)
+      |> L.dedup
+      |> map moduleHeader
+
+-- | E.g. @src/Geometry.h@ for @Geometry@.
+moduleHeader :: Module -> FilePath
+moduleHeader module' = moduleToPath module' ".h"
+
+-- | Functions called by instructions, including inside matches.
+callees :: [KirInstruct] -> [KirName]
+callees = concatMap $ \case
+   KirCall { callee = callee } -> [callee]
+   KirMatch { arms = arms, fallback = fallback } ->
+      let branches = map (.branch) arms ++ maybeToList fallback
+      in concatMap (\branch -> callees branch.instructs) branches
+   _ -> []
 
 codegenFn :: KirFunction -> CCodegen CFunction
 codegenFn func = do
@@ -216,29 +280,31 @@ codegenInstruct = \case
    KirStore storedType dest value -> pure $ case dest of
       DestLocal localId -> [CDeclStmt (typeToCType storedType) (localName localId) (Just (valueToExpr value))]
       DestBinding _ -> [assignToDest dest value]
-   KirField {} ->
-      todo__ "payload field access needs an ADT layout in the C backend"
-   KirMatch { ty = matchType, scrutinee = scrutinee, arms = arms, fallback = fallback, dest = dest, exhaustive = exhaustive } ->
-      codegenMatch matchType scrutinee arms fallback dest exhaustive
+   KirConstruct { ty = builtType, ctor = ctor, args = fields, dst = KirName resultName } -> do
+      env <- ask
+      let value = constructExpr env.types builtType ctor (map valueToExpr fields)
+      pure [CDeclStmt (typeToCType builtType) resultName (Just value)]
+   KirField { ty = fieldType, src = source, ctor = ctor, fieldName = fieldName, dst = KirName resultName } -> do
+      env <- ask
+      let access = fieldAccess env.types (valueToExpr source) ctor fieldName
+      pure [CDeclStmt (typeToCType fieldType) resultName (Just access)]
+   KirMatch { ty = matchType, scrutinee = scrutinee, arms = arms, fallback = fallback, dest = dest, exhaustive = exhaustive } -> do
+      env <- ask
+      let scrutineeExpr = matchedTag env.types arms (valueToExpr scrutinee)
+      codegenMatch matchType scrutineeExpr arms fallback dest exhaustive
 
 -- | A static inline C function for one intrinsic instance.
 --   The body comes from 'intrinsicDefinitions'.
 codegenIntrinsic :: KirIntrinsicDef -> CFunction
 codegenIntrinsic instance' =
-   let paramNames = zipWith (\index _ -> intrinsicParamName index) [0 ..] instance'.params
-       args = L.forEach (zip instance'.params paramNames) $ \(paramType, paramName) ->
-         CFuncArg { ty = typeToCType paramType, name = paramName }
-       operandType = case instance'.params of
-         first : _ -> first
-         []        -> instance'.retTy
+   let paramNames = map intrinsicParamName [0 .. length instance'.params - 1]
+       args = zipWith intrinsicParam instance'.params paramNames
        site = IntrinsicSite
          { params      = map CVar paramNames
-         , operandType = operandType
+         , operandType = intrinsicOperandType instance'
          , resultType  = instance'.retTy
          }
-       definition = case M.lookup instance'.intrinsic intrinsicDefinitions of
-         Just known -> known
-         Nothing    -> unreachableWith ("the semantic analyzer let through unknown intrinsic " ++ show instance'.intrinsic)
+       definition = lookupIntrinsicDefinition instance'.intrinsic
    in CFunction
       { linkage = CStaticInline
       , ty      = typeToCType instance'.retTy
@@ -247,12 +313,107 @@ codegenIntrinsic instance' =
       , body    = definition.body site
       }
 
+intrinsicParam :: Type -> Text -> CFuncArg
+intrinsicParam paramType paramName = CFuncArg { ty = typeToCType paramType, name = paramName }
+
+-- | The type that picks an intrinsic's C code: its first parameter's, e.g. @Int@
+--   for @opEq@ on @Int@, or its result's when it has no parameters.
+intrinsicOperandType :: KirIntrinsicDef -> Type
+intrinsicOperandType instance' = case instance'.params of
+   first : _ -> first
+   []        -> instance'.retTy
+
+lookupIntrinsicDefinition :: FunctionName -> IntrinsicDefinition
+lookupIntrinsicDefinition name = case M.lookup name intrinsicDefinitions of
+   Just known -> known
+   Nothing    -> unreachableWith ("the semantic analyzer let through unknown intrinsic " ++ show name)
+
 intrinsicParamName :: Int -> Text
 intrinsicParamName index = "_a" <> T.pack (show index)
 
+-- | A value built by a constructor, in the C layout of its type:
+--
+--   > Circle                   // enum
+--   > (Point){ ._0 = x, ._1 = y }  // plain struct
+--   > (Option_Int){ .tag = Option_Int_Some, .as.Some = { ._0 = x } }  // tagged union
+constructExpr
+   :: [KirTypeDef]
+   -> Type      -- ^ the type built
+   -> CtorName
+   -> [CExpr]   -- ^ the fields
+   -> CExpr
+constructExpr types builtType ctor fields = case typeDefOfCtor types ctor of
+   Just (typeDef, kirCtor)
+      | isEnum typeDef -> CVar ctor.inner
+      | isPlainStruct typeDef -> CCompound
+         { compoundType = Just (typeToCType builtType)
+         , initializers = fieldInitializers kirCtor fields
+         }
+      | otherwise ->
+         let tag = ("tag", CVar ctor.inner)
+         in CCompound
+            { compoundType = Just (typeToCType builtType)
+            , initializers = tag : payloadInitializer typeDef kirCtor fields
+            }
+   Nothing -> unreachableWith ("constructor of no known type: " ++ show ctor)
+
+-- | The payload of a tagged union constructor, if it has fields,
+--   e.g. @.as.Some = { ._0 = x }@.
+payloadInitializer :: KirTypeDef -> KirCtor -> [CExpr] -> [(Text, CExpr)]
+payloadInitializer typeDef kirCtor fields
+   | null kirCtor.fields = []
+   | otherwise =
+      let member = "as." <> unionMemberName typeDef.name kirCtor.name
+          payload = CCompound
+            { compoundType = Nothing
+            , initializers = fieldInitializers kirCtor fields
+            }
+      in [(member, payload)]
+
+-- | E.g. @[("_0", x), ("_1", y)]@ for @Point x y@.
+fieldInitializers :: KirCtor -> [CExpr] -> [(Text, CExpr)]
+fieldInitializers kirCtor fields =
+   let fieldNames = kirCtor.fields |> map (\field -> field.name.inner)
+   in zip fieldNames fields
+
+-- | Reads a field of a constructor: @value._0@, or @value.as.Some._0@ in a tagged union.
+fieldAccess :: [KirTypeDef] -> CExpr -> CtorName -> FieldName -> CExpr
+fieldAccess types source ctor fieldName = case typeDefOfCtor types ctor of
+   Just (typeDef, kirCtor)
+      | isPlainStruct typeDef -> CMember source fieldName.inner
+      | otherwise ->
+         let union = CMember source "as"
+             payload = CMember union (unionMemberName typeDef.name kirCtor.name)
+         in CMember payload fieldName.inner
+   Nothing -> unreachableWith ("field of a constructor of no known type: " ++ show ctor)
+
+-- | What a match tests: the tag of a tagged union, otherwise the value itself,
+--   e.g. @switch (opt.tag)@ for an @Option Int@, but @switch (shape)@ for an enum.
+matchedTag :: [KirTypeDef] -> [KirMatchArm] -> CExpr -> CExpr
+matchedTag types arms scrutinee
+   | any (testsTaggedUnion types) arms = CMember scrutinee "tag"
+   | otherwise                         = scrutinee
+
+-- | Whether an arm tests a constructor of a tagged union, e.g. @Some@ of @Option Int@.
+testsTaggedUnion :: [KirTypeDef] -> KirMatchArm -> Bool
+testsTaggedUnion types arm = case arm.tag of
+   TagLit _     -> False
+   TagCtor ctor -> case typeDefOfCtor types ctor of
+      Just (typeDef, _) -> isTaggedUnion typeDef
+      Nothing           -> False
+
+-- | The type a constructor belongs to, and the constructor itself.
+typeDefOfCtor :: [KirTypeDef] -> CtorName -> Maybe (KirTypeDef, KirCtor)
+typeDefOfCtor types ctor = listToMaybe
+   [ (typeDef, kirCtor)
+   | typeDef <- types
+   , kirCtor <- typeDef.ctors
+   , kirCtor.name == ctor
+   ]
+
 codegenMatch
    :: Type
-   -> KirValue
+   -> CExpr     -- ^ what is tested
    -> [KirMatchArm]
    -> Maybe KirBranch
    -> KirDest
@@ -262,7 +423,7 @@ codegenMatch matchType scrutinee arms fallback dest exhaustive = do
    armStmts <- if canSwitch then codegenSwitch else fromMaybe [] <$> goIf arms
    pure (declStmt ++ armStmts)
    where
-      scrutExpr = valueToExpr scrutinee
+      scrutExpr = scrutinee
 
       declStmt = case dest of
          _ | isUnitType matchType -> []

@@ -149,7 +149,7 @@ desugaredAnn ti = DesugaredInfo ti.ty ti.res
 newtype LocalId = LocalId { inner :: Int }
    deriving (Eq, Ord, Show)
 newtype FunctionId = FunctionId { inner :: Int }
-   deriving (Eq, Show)
+   deriving (Eq, Ord, Show)
 newtype ConstructorId = ConstructorId { inner :: Int }
    deriving (Eq, Ord, Show)
 newtype ExternId = ExternId { inner :: Int }
@@ -582,6 +582,13 @@ data IntrinsicDecl = IntrinsicDecl
    , retType :: Type
    }
    deriving (Eq, Show)
+
+-- | A project or library, named in its xast.toml.
+type PackageName = Text
+
+-- | The only package that may use @Intrinsic, @number@ and @concatenative@.
+stdPackageName :: PackageName
+stdPackageName = "std"
 
 -- | Types allowed for @number@.
 numberTypeNames :: [TypeName]

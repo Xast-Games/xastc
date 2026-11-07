@@ -1,14 +1,60 @@
 module Std.Prelude exports {
-    -- Option
-    Option, Some, None,
-
-    -- Bool
+    -- Bool:
     Bool, True, False,
 
-    -- Function
+    -- Char:
+    Char,
+
+    -- Function:
     id, const
+
+    -- Num:
+    Size,   USize,
+    Long,   ULong,
+    Int,    UInt,
+    Short,  UShort,
+    Byte,   UByte,
+    Float,  Double,
+
+    -- Ops:
+    -- # arithmetical:
+    opAdd, opSub, opMul, opDiv, opMod, opPow, opNeg,
+    -- # comparison:
+    opEq, opNeq, opLt, opGt, opLe, opGe,
+    -- # logical:
+    opAnd, opOr, opNot,
+    -- # functional:
+    opPipe,
+    -- # arrays:
+    opConcat,
+    -- # bitwise:
+    opBitwiseAnd, opBitwiseOr, opBitwiseXor, 
+    opShiftLeft, opShiftRight,
+
+    -- Option:
+    Option, Some, None,
+
+    -- Result:
+    Result, Ok, Err,
+
+    -- String:
+    String,
+
+    -- Trace:
+    debugTrace,
 }
 
-use Std.Option *
+use Std.Alloc *
 use Std.Bool *
+use Std.Error *
+use Std.Num *
+use Std.OptionResult *
+use Std.Prelude *
+use Std.String *
+use Std.BoolUtils *
+use Std.Char *
 use Std.Function *
+use Std.Ops *
+use Std.Option *
+use Std.Result *
+use Std.Trace *

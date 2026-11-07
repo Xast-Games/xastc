@@ -219,6 +219,7 @@ eraseInstructs env instructs =
 eraseInstruct :: ErasureEnv -> KirInstruct -> (ErasureEnv, [KirInstruct])
 eraseInstruct env = \case
    KirCall resultType callee args out -> eraseCall env resultType callee args out
+   KirConstruct builtType ctor args dst -> eraseConstruct env builtType ctor args dst
    KirAssign binding value            -> eraseAssign env binding value
    KirStore storedType dest value     -> eraseStore env storedType dest value
    KirField fieldType src ctor fieldName dst -> eraseField env fieldType src ctor fieldName dst
@@ -258,6 +259,15 @@ keepCallArgs env callee args = case M.lookup callee env.context.signatures of
       |> filter fst
       |> map snd
    Nothing -> args |> filter (not . isErasedValue env)
+
+-- | Building a zero-sized value is dropped, and so are zero-sized fields,
+--   as they are dropped from the type too.
+eraseConstruct :: ErasureEnv -> Type -> CtorName -> [KirValue] -> KirName -> (ErasureEnv, [KirInstruct])
+eraseConstruct env builtType ctor args dst
+   | isZeroSized env.context.zstTypes builtType = (markVarErased env dst, [])
+   | otherwise =
+      let keptArgs = args |> filter (not . isErasedValue env)
+      in (env, [KirConstruct builtType ctor keptArgs dst])
 
 -- | Writing an erased value, or writing to an erased binding, does nothing.
 eraseAssign :: ErasureEnv -> KirBindingId -> KirValue -> (ErasureEnv, [KirInstruct])

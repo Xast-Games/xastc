@@ -1,9 +1,11 @@
-module Std.BoolUtils exporting *
+module Std.BoolUtils exports *
 
 use Std.Bool *
+use Std.Option { Option, Some, None }
+use Std.Result { Result, Ok, Err }
 
-fn then (Bool, a) -> Option a;
-fn then val a = 
+fn thenSome (Bool, a) -> Option a;
+fn thenSome val a = 
     if val then Some a else None;
 
 fn okOr (Bool, e) -> Result () e;

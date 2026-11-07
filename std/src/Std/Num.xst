@@ -19,3 +19,7 @@ extern type UShort;
 extern type Byte;
 
 extern type UByte;
+
+extern type Float;
+
+extern type Double;

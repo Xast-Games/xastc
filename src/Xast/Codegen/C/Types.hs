@@ -7,6 +7,7 @@ type EcsTag = KirName
 
 data CProgram = CProgram
    { path :: FilePath
+   , includes :: [FilePath]  -- ^ headers of other modules it calls
    , declarations :: [CDecl]
    }
    deriving Show
@@ -17,6 +18,7 @@ data CDecl
    | CTaggedUnionDef CTaggedUnionDefinition
    | CEnumDef CEnumDefinition
    | CFunc CFunction
+   | CFuncPrototype CFunction  -- only the signature, so it can be called before its definition
    | CGlob CGlobal
    deriving Show
 
@@ -104,6 +106,14 @@ data CExpr
    | CAssign
       { target :: CExpr
       , value  :: CExpr
+      }
+   | CMember  -- object.member
+      { object :: CExpr
+      , member :: Text
+      }
+   | CCompound  -- (type){ .field = value, ... }, or just { ... } without a type
+      { compoundType :: Maybe CType
+      , initializers :: [(Text, CExpr)]  -- ^ designator, e.g. @as.Some@, and value
       }
    | CConditional  -- condition ? whenTrue : whenFalse
       { condition :: CExpr

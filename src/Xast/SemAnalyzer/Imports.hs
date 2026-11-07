@@ -70,13 +70,18 @@ resolveAmbiguity (Program _ imports _ _) = do
          |> map (\imported -> (imported.name, [imported]))
          |> M.fromListWith (++)
    forM_ (M.toList importedByName) $ \(ident, sources) ->
-      let sorted = sortBy (\first second -> sortLocByPos first.location second.location) sources
-          clashes =
-            [ (first.location, second.location)
-            | (first, second) <- pairs sorted
-            , first.declaredIn /= second.declaredIn
-            ]
-      in forM_ clashes $ \(loc1, loc2) -> errSem (SEAmbiguousImport ident loc1 loc2)
+      forM_ (importClashes sources) $ \(loc1, loc2) ->
+         errSem (SEAmbiguousImport ident loc1 loc2)
+
+-- | Pairs of imports of one name that bring in different symbols, e.g. @map@
+--   from both @use Std.Option *@ and @use Std.Result *@, in source order.
+importClashes :: [ImportedName] -> [(Location, Location)]
+importClashes sources =
+   let sorted = sortBy (\first second -> sortLocByPos first.location second.location) sources
+   in [ (first.location, second.location)
+      | (first, second) <- pairs sorted
+      , first.declaredIn /= second.declaredIn
+      ]
 
 -- | A name brought in by an unaliased import.
 data ImportedName = ImportedName
@@ -89,7 +94,11 @@ data ImportedName = ImportedName
 --   elsewhere), each name counts as declared there.
 importedNames :: M.Map Module ModuleInfo -> Located ImportDef -> [ImportedName]
 importedNames modules (Located location (ImportDef moduleName payload)) =
-   let imported name declaredIn = ImportedName { name = name, declaredIn = declaredIn, location = location }
+   let imported name declaredIn = ImportedName
+         { name       = name
+         , declaredIn = declaredIn
+         , location   = location
+         }
        exported = maybe M.empty (.exports) (M.lookup moduleName modules)
    in case payload of
       ImpAlias _ -> []
@@ -227,7 +236,12 @@ reexportedFrom modules identifier importDef
    | importBringsIn modules importDef identifier = exportOrigin modules importDef.importModule identifier
    | otherwise                                   = Nothing
 
--- | Programs sorted so that dependencies come first.
+-- | Programs sorted so that dependencies come first, e.g. for
+--
+--   > module Main  -- use Std.Prelude *
+--   > module Std.Prelude  -- use Std.Option *
+--
+--   the order is @Std.Option@, @Std.Prelude@, @Main@.
 --   Modules in an import cycle (reported separately) keep any order.
 inImportOrder :: [Program Parsed] -> [Program Parsed]
 inImportOrder programs =

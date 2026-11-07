@@ -6,6 +6,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Map as M
 import Xast.Utils.Generic ((|>))
+import Xast.SemAnalyzer.Types (AnalysisResult (..))
 
 data LowerState = LowerState
    { nameSupply :: Int
@@ -15,7 +16,25 @@ data LowerState = LowerState
    , ctorSpans  :: M.Map ConstructorId Int
    , ctorFieldNames :: M.Map QualifiedIdent [FieldName]  -- ^ declared field names of each constructor
    , intrinsics :: M.Map ExternId IntrinsicDecl  -- ^ @Intrinsic declarations
+   , functionModules :: M.Map FunctionId Module  -- ^ declaring module of every function
    , intrinsicInsts :: M.Map TypeInst KirIntrinsicDef  -- ^ requested intrinsic instances
+   , funcTmpls :: M.Map QualifiedIdent FunctionTemplate  -- ^ every function, by name
+   , funcInsts :: M.Map TypeInst KirName  -- ^ requested generic function instances
+   , funcQueue :: [FunctionRequest]  -- ^ instances still to lower
+   , loweredInsts :: [(Module, KirFunction)]  -- ^ lowered instances, with their module
+   }
+
+-- | A function as declared, to lower once per set of types.
+data FunctionTemplate = FunctionTemplate
+   { moduleName :: Module
+   , signature  :: FuncDef
+   , impl       :: FuncImpl Desugared
+   }
+
+-- | A generic function instance waiting to be lowered.
+data FunctionRequest = FunctionRequest
+   { instance'  :: TypeInst
+   , typeParams :: M.Map Type Type  -- ^ each generic or @number@ of the signature → its type here
    }
 
 data TypeInst = TypeInst
@@ -24,23 +43,40 @@ data TypeInst = TypeInst
    }
    deriving (Eq, Ord, Show)
 
-newLowerState 
-   :: M.Map ConstructorId Int 
-   -> M.Map ExternId IntrinsicDecl
-   -> [Program Desugared]
-   -> LowerState
-newLowerState spans intrinsics progs = LowerState 
+newLowerState :: AnalysisResult -> LowerState
+newLowerState analysis = LowerState
    { nameSupply   = 0
-   , intrinsics   = intrinsics
+   , intrinsics   = analysis.intrinsics
+   , functionModules = analysis.functionModules
    , intrinsicInsts = M.empty
-   , ctorSpans    = spans
+   , funcTmpls    = functionTemplates analysis.progs
+   , funcInsts    = M.empty
+   , funcQueue    = []
+   , loweredInsts = []
+   , ctorSpans    = analysis.ctorSpans
    , typeTmpls    = M.fromList
-      [ (declaredIn p td.name, td) | p <- progs, StmtTypeDef td <- p.stmts ] 
+      [ (declaredIn p td.name, td) | p <- analysis.progs, StmtTypeDef td <- p.stmts ] 
    , typeInsts    = M.empty
    , typeQueue    = []
    , ctorFieldNames = M.fromList
       [ (declaredIn p ctor.name, map fst (payloadFields ctor.payload))
-      | p <- progs, StmtTypeDef td <- p.stmts, ctor <- td.ctors ]
+      | p <- analysis.progs, StmtTypeDef td <- p.stmts, ctor <- td.ctors ]
+   }
+
+functionTemplates :: [Program Desugared] -> M.Map QualifiedIdent FunctionTemplate
+functionTemplates programs = M.fromList
+   [ (declaredIn program funcDef.name, functionTemplate program funcDef funcImpl)
+   | program <- programs
+   , StmtFunc (FnDef funcDef) <- program.stmts
+   , StmtFunc (FnImpl funcImpl) <- program.stmts
+   , funcImpl.name == funcDef.name
+   ]
+
+functionTemplate :: Program Desugared -> FuncDef -> FuncImpl Desugared -> FunctionTemplate
+functionTemplate program funcDef funcImpl = FunctionTemplate
+   { moduleName = program.moduleDef.name
+   , signature  = funcDef
+   , impl       = funcImpl
    }
 
 -- | A name declared at the top level of a program.
@@ -111,6 +147,10 @@ isEnum :: KirTypeDef -> Bool
 isEnum td = td.ctors
    |> all (\ctor -> null ctor.fields)
 
+-- | Several constructors, some with fields, e.g. @type Option a = Some a | None;@
+isTaggedUnion :: KirTypeDef -> Bool
+isTaggedUnion td = not (isEnum td) && not (isPlainStruct td)
+
 isPlainStruct :: KirTypeDef -> Bool
 isPlainStruct td = case td.ctors of
    [single] -> not $ null single.fields
@@ -169,6 +209,13 @@ data KirInstruct
       , callee :: KirName
       , args   :: [KirValue]
       , out    :: Maybe KirName
+      }
+   -- | A value built by a constructor, e.g. @Some 1@ or @None@.
+   | KirConstruct
+      { ty   :: Type        -- ^ the monomorphic type built
+      , ctor :: CtorName    -- ^ mangled, e.g. @Std_Option_Option_Std_Num_Int_Some@
+      , args :: [KirValue]  -- ^ one per field
+      , dst  :: KirName
       }
    | KirAssign
       { binding :: KirBindingId

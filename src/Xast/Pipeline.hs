@@ -1,25 +1,21 @@
 {-# LANGUAGE LambdaCase #-}
 module Xast.Pipeline where
 
-import Control.Monad (unless, filterM, forM_)
+import Control.Monad (forM_)
 import Control.Monad.Except
 import Control.Monad.IO.Class (MonadIO(liftIO))
-import Data.Text (pack)
 import Data.List (dropWhileEnd)
-import Data.Either (partitionEithers)
-import System.Directory (getCurrentDirectory, doesFileExist)
+import System.Directory (getCurrentDirectory)
 import System.Process
 import System.IO
 
-import Xast.Config (xastConfigCodec, projectConfig, modules)
-import Xast.Error.Types (XastError (..))
-import Xast.Parser.Program (parseProgram)
 import Xast.AST
+import Xast.Package (loadPackages, modulePackages, parsePackage, preludeImport)
+import Xast.Error.Types (XastError (..))
 import Xast.SemAnalyzer.Pass (fullAnalysis)
 import Xast.SemAnalyzer.Types (AnalysisResult(..))
 import Xast.Error.Pretty (PrintError(printError), printWarnings)
 import Xast.Utils.Pretty
-import qualified Toml
 import Control.Monad.RWS (MonadTrans(lift))
 import Xast.Lowerer.Pass (lowerPrograms)
 import Xast.Lowerer.EraseZero (eraseZeroSized, EraseResult (EraseResult))
@@ -27,6 +23,7 @@ import Xast.Codegen.C.Pretty (debugPrograms, prettyProgram)
 import Xast.Codegen.C.Pass (codegen)
 import Xast.Utils.Compiler (Target(Target64))
 import GHC.IO.Exception (ExitCode)
+import qualified Data.Map as M
 
 runCompile :: Maybe FilePath -> IO ()
 runCompile dir = runCompile_ dir >>= \case
@@ -55,43 +52,27 @@ runCompile_ dir = runExceptT $ do
    -- Get current dir
    currentDir <- liftIO $ maybe getCurrentDirectory (pure . dropWhileEnd (== '/')) dir
 
-   -- Load project configuration
-   let configFile = currentDir ++ "/xast.toml"
-   configFileExists <- liftIO $ doesFileExist configFile
-   unless configFileExists $
-      throwError [XastFileNotFound "xast.toml" currentDir]
+   -- Load the project and its dependencies, Std included
+   packages <- loadPackages currentDir
+   packageOfModule <- liftEither (modulePackages packages)
 
-   tomlRes <- Toml.decodeFileEither xastConfigCodec configFile
-   config <- case tomlRes of
-      Left errors -> throwError (XastTomlDecodeError configFile <$> errors)
-      Right cfg   -> pure cfg
+   -- Parse modules, dependencies first
+   programsNoPrelude <- concat <$> mapM parsePackage packages
 
-   invalidModules <- liftIO $ filterM
-      (\m -> not <$> doesFileExist (currentDir ++ "/" ++ moduleToPath m ".xst"))
-      config.projectConfig.modules
-
-   case invalidModules of
-      (m:_) -> throwError [XastModuleNotFound m currentDir]
-      []    -> return ()
-
-   -- Parse modules
-   results <- liftIO $ traverse (parseOne currentDir) config.projectConfig.modules
-   let (errors, programs) = partitionEithers results
-   unless (null errors) $
-      throwError errors
+   let programs = map (withPrelude packageOfModule) programsNoPrelude
 
    -- Get compile target
    -- FIXME: Target64 only
    let target = Target64
 
    -- Semantic analysis
-   semResult <- runExceptT $ fullAnalysis  (lift . printWarnings) (\path content -> liftIO $ writeFile path content) programs target
-   (warnings, progsAnalyzed, ctorSpans, intrinsics) <- case semResult of
+   semResult <- runExceptT $ fullAnalysis (lift . printWarnings) (\path content -> liftIO $ writeFile path content) programs packageOfModule target
+   analysis <- case semResult of
       Left errs -> throwError (XastSemAnalyzeError <$> errs)
-      Right res -> return (res.warningsCount, res.progs, res.ctorSpans, res.intrinsics)
+      Right res -> return res
 
    -- Lowering AST into KIRA
-   let (loweredIR, typeDefs, intrinsicDefs) = lowerPrograms ctorSpans intrinsics progsAnalyzed
+   let (loweredIR, typeDefs, intrinsicDefs) = lowerPrograms analysis
 
    -- Erasing zero-sized types: they have no representation in C
    let EraseResult erasedIR erasedTypeDefs ecsTags = eraseZeroSized loweredIR typeDefs
@@ -106,7 +87,15 @@ runCompile_ dir = runExceptT $ do
 
    _ <- liftIO $ compileGcc $ show $ prettyProgram $ head generatedC
 
-   return warnings
+   return analysis.warningsCount
+
+-- | Every module outside Std implicitly imports Std.Prelude.
+withPrelude :: M.Map Module PackageName -> Program Parsed -> Program Parsed
+withPrelude packageOfModule program =
+   let inStd = M.lookup program.moduleDef.name packageOfModule == Just stdPackageName
+   in if inStd
+      then program
+      else program { imports = preludeImport program : program.imports }
 
 compileGcc :: String -> IO ExitCode
 compileGcc source = do
@@ -122,28 +111,3 @@ compileGcc source = do
    hClose hin
 
    waitForProcess ph
-
-parseOne :: FilePath -> Module -> IO (Either XastError (Program Parsed))
-parseOne currentDir module_ = runExceptT $ do
-   let filepath = currentDir ++ "/" ++ moduleToPath module_ ".xst"
-   code <- liftIO $ readFile filepath
-   program <- ExceptT $ pure $ parseProgram filepath (pack code)
-   checkModuleName module_ program
-   pure program
-
--- | A module must be declared in the file its name points to,
---   e.g. module @MyModule.MyUtils@ in @src/MyModule/MyUtils.xst@.
-checkModuleName
-   :: Monad m
-   => Module          -- ^ the module the file was loaded for
-   -> Program Parsed
-   -> ExceptT XastError m ()
-checkModuleName expected program =
-   let declared = program.moduleDef.name
-       mismatch = XastModuleNameMismatch
-         { location = program.moduleDef.location
-         , expected = expected
-         , declared = declared
-         }
-   in unless (declared == expected) $
-         throwError mismatch

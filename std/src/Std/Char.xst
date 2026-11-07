@@ -1,0 +1,3 @@
+module Std.Char exports *
+
+extern type Char;

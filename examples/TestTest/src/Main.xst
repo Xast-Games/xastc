@@ -31,8 +31,6 @@ fn gg x = x;
 @Tag
 type Unit = Unit;
 
-type Bool = True | False;
-
 fn g (Unit) -> Unit;
 fn g x = x;
 

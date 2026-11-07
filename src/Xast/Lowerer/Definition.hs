@@ -51,8 +51,8 @@ lowerSystem module' impl = do
 
    return KirSystem {..}
 
-lowerFunction :: Module -> FuncImpl Desugared -> Lowerer KirFunction
-lowerFunction module' impl = do
+lowerFunction :: KirName -> FuncImpl Desugared -> Lowerer KirFunction
+lowerFunction name impl = do
    match <- case impl.body of
       ExpMatch _ matchExpr -> pure matchExpr
       _ -> todo__ "only a top-level `match` function body is supported yet"
@@ -74,7 +74,6 @@ lowerFunction module' impl = do
    resultId <- freshKirLocalId
    bodyInstrs <- lowerMatchTo env retTy (DestLocal resultId) match
 
-   let name = KirName (namespacedName module' impl.name)
    params <- forM paramInfos $ \(_, ident, paramType) -> do
       monoParamType <- monoType paramType
       pure KirParam { ty = monoParamType, name = KirName ident.inner }

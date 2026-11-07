@@ -12,16 +12,18 @@ data AnalysisResult = AnalysisResult
    , progs         :: [Program Desugared]
    , ctorSpans     :: M.Map ConstructorId Int
    , intrinsics    :: M.Map ExternId IntrinsicDecl
+   , functionModules :: M.Map FunctionId Module  -- ^ declaring module of every function
    }
 
 data Env = Env
-   { vars      :: M.Map VarName VarInfo
-   , functions :: M.Map FunctionName FuncSig
-   , systems   :: M.Map SystemName SystemSig
-   , currentTarget :: Target
+   { vars           :: M.Map VarName VarInfo
+   , functions      :: M.Map FunctionName FuncSig
+   , systems        :: M.Map SystemName SystemSig
+   , modulePackages :: M.Map Module PackageName
+   , currentTarget  :: Target
    }
 
-emptyEnv :: Target -> Env
+emptyEnv :: M.Map Module PackageName -> Target -> Env
 emptyEnv = Env M.empty M.empty M.empty
 
 data SymTable = SymTable

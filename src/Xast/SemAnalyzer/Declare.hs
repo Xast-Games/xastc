@@ -10,7 +10,9 @@ import Xast.AST
 import Xast.Error.Types
 import Xast.SemAnalyzer.Monad
 import Xast.SemAnalyzer.Types
-import Xast.SemAnalyzer.Unify (freshConstructorId, freshExternId, freshFunctionId)
+import Xast.SemAnalyzer.Unify (freshConstructorId, freshExternId, freshFunctionId, collectIntrinsics)
+import Xast.SemAnalyzer.TypeUsages (payloadTypes)
+import Control.Monad.Reader (asks)
 import Xast.Codegen.C.Intrinsics (IntrinsicDefinition (..), intrinsicDefinitions)
 
 -- #### DECLARE STATEMENTS ####
@@ -36,6 +38,10 @@ declareStmts (Program moduleDef@(ModuleDef _ moduleName _) _ stmts _) = do
    enterModule moduleDef
    modify $ \symTable -> symTable { currentModule = moduleName }
    forM_ stmts declareStmt
+
+   inStd <- isStdModule moduleName
+   unless inStd $
+      forM_ stmts checkNoIntrinsicTypes
 
 declareStmt :: Stmt Parsed -> SemAnalyzer ()
 declareStmt = \case
@@ -128,21 +134,52 @@ checkTagType typeDef =
    in when (isTag && not (isPlainMarker typeDef)) $
          errSem invalidTag
 
--- | An @Intrinsic declaration must match a compiler definition, including arity.
+-- | An @Intrinsic declaration must be in Std and match a compiler definition,
+--   including arity.
 checkIntrinsic :: ExternFunc -> SemAnalyzer ()
-checkIntrinsic extern =
+checkIntrinsic extern = do
+   moduleName <- gets (.currentModule)
+   inStd <- isStdModule moduleName
    let isIntrinsic = ExtFnMod ModIntrinsic `elem` extern.modifiers
-       declaredArity = length extern.args
+   when (isIntrinsic && not inStd) $
+      errSem (SEIntrinsicOutsideStd extern.location extern.name)
+   when (isIntrinsic && inStd) $
+      checkIntrinsicDefinition extern
+
+-- | The compiler defines the intrinsic, with as many parameters.
+checkIntrinsicDefinition :: ExternFunc -> SemAnalyzer ()
+checkIntrinsicDefinition extern =
+   let declaredArity = length extern.args
        arityMismatch definition = SEIntrinsicArityMismatch
          { location      = extern.location
          , name          = extern.name
          , expectedArity = definition.arity
          , actualArity   = declaredArity
          }
-   in when isIntrinsic $ case M.lookup extern.name intrinsicDefinitions of
-         Nothing -> errSem (SEUnknownIntrinsic extern.location extern.name)
-         Just definition -> unless (definition.arity == declaredArity) $
-            errSem (arityMismatch definition)
+   in case M.lookup extern.name intrinsicDefinitions of
+      Nothing -> errSem (SEUnknownIntrinsic extern.location extern.name)
+      Just definition -> unless (definition.arity == declaredArity) $
+         errSem (arityMismatch definition)
+
+isStdModule :: Module -> SemAnalyzer Bool
+isStdModule moduleName = do
+   packages <- asks (.modulePackages)
+   pure (M.lookup moduleName packages == Just stdPackageName)
+
+-- | Outside Std, a declaration may not use @number@ or @concatenative@.
+checkNoIntrinsicTypes :: Stmt Parsed -> SemAnalyzer ()
+checkNoIntrinsicTypes stmt = forM_ (declaredTypes stmt) $ \(Located location type') ->
+   forM_ (collectIntrinsics type') $ \kind ->
+      errSem (SEIntrinsicTypeOutsideStd location kind)
+
+-- | The types written in a declaration.
+declaredTypes :: Stmt Parsed -> [Located Type]
+declaredTypes = \case
+   StmtFunc (FnDef funcDef)      -> funcDef.retType : funcDef.args
+   StmtExtern (ExtFunc extern)   -> extern.retType : extern.args
+   StmtTypeDef typeDef           -> concatMap (payloadTypes . (.payload)) typeDef.ctors
+   StmtSystem (SysDef systemDef) -> systemDef.retType : concatMap (.types) systemDef.entities
+   _                             -> []
 
 -- | Whether a type has no type parameters and a single constructor without fields.
 isPlainMarker :: TypeDef -> Bool

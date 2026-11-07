@@ -1,0 +1,11 @@
+module Geometry exports *
+
+type Shape = Triangle | Square | Circle;
+
+fn corners (Shape) -> Int;
+fn corners Triangle = 3;
+fn corners Square   = 4;
+fn corners Circle   = 0;
+
+fn area (Double, Double) -> Double;
+fn area width height = width * height / 2.0;

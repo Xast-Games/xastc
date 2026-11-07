@@ -1,0 +1,12 @@
+[project]
+name    = "Shapes"
+version = "0.1.0"
+author  = "Koncepto Sociala"
+modules = [
+    "Main",
+    "Geometry",
+]
+
+[api]
+labels = []
+components = []

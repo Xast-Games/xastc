@@ -125,6 +125,10 @@ data ModifierError
       { location :: Location
       , name     :: FunctionName  -- ^ not defined by the compiler
       }
+   | SEIntrinsicOutsideStd
+      { location :: Location
+      , name     :: FunctionName
+      }
    | SEIntrinsicArityMismatch
       { location      :: Location
       , name          :: FunctionName
@@ -181,7 +185,11 @@ instance ToSemError UndefinedError where
 
 -- | A declaration and its implementations that do not pair up.
 data DefinitionError
-   = SEMissingFnDef
+   = SEIntrinsicTypeOutsideStd
+      { location :: Location     -- ^ the type that uses it
+      , kind     :: TyIntrinsic
+      }
+   | SEMissingFnDef
       { location :: Location  -- ^ the implementation without a declaration
       , name     :: Ident
       }
@@ -339,5 +347,16 @@ data XastError
       { location :: Location  -- ^ the module header
       , expected :: Module    -- ^ the module the file path stands for
       , declared :: Module    -- ^ the module the header names
+      }
+   | XastStdNotFound
+      { directory :: FilePath  -- ^ where Std was looked for
+      }
+   | XastPackageCycle
+      { packages :: [PackageName]  -- ^ the cycle, first package repeated at the end
+      }
+   | XastDuplicateModule
+      { moduleName     :: Module
+      , firstPackage   :: PackageName
+      , secondPackage  :: PackageName
       }
    deriving Show

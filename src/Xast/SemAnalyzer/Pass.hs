@@ -28,10 +28,11 @@ fullAnalysis
    => ([SemWarning] -> m ())
    -> (FilePath -> String -> m ())
    -> [Program Parsed]
+   -> M.Map Module PackageName  -- ^ the package of every module
    -> Target
    -> ExceptT [SemError] m AnalysisResult
-fullAnalysis reportWarnings saveFile programs target = do
-   let env = emptyEnv target
+fullAnalysis reportWarnings saveFile programs packageOfModule target = do
+   let env = emptyEnv packageOfModule target
        symTable0 = emptySymTable
 
    (_, symTable1, warnings1) <- ExceptT $ pure $ runPhase env symTable0 (forM programs declareStmts)
@@ -64,6 +65,7 @@ fullAnalysis reportWarnings saveFile programs target = do
       , progs = programsDesugared
       , ctorSpans = collectCtorSpans symTable6
       , intrinsics = collectIntrinsics programsDesugared symTable6
+      , functionModules = collectFunctionModules symTable6
       }
 
 -- | All @Intrinsic declarations, by extern id.
@@ -75,6 +77,13 @@ collectIntrinsics programs symTable = M.fromList
    , ExtFnMod ModIntrinsic `elem` extern.modifiers
    , Just moduleInfo <- [M.lookup program.moduleDef.name symTable.modules]
    , Just (SymbolExternFn _ externId _) <- [M.lookup extern.name moduleInfo.symbols]
+   ]
+
+collectFunctionModules :: SymTable -> M.Map FunctionId Module
+collectFunctionModules symTable = M.fromList
+   [ (functionId, moduleName)
+   | (moduleName, moduleInfo) <- M.toList symTable.modules
+   , SymbolFn _ functionId _ <- M.elems moduleInfo.symbols
    ]
 
 intrinsicDecl :: Program Desugared -> ExternFunc -> IntrinsicDecl

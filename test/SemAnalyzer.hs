@@ -8,8 +8,10 @@ import Data.Either (lefts, rights)
 import Data.List (intercalate)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Map as M
 import Test.HUnit
 import Xast.Error.Types
+import Xast.AST (PackageName, stdPackageName, Program (..), ModuleDef (..))
 import Xast.Parser.Program (parseProgram)
 import Xast.SemAnalyzer.Pass (fullAnalysis)
 import Xast.SemAnalyzer.Types (AnalysisResult)
@@ -553,19 +555,33 @@ systemTests = TestList
 
 -- | Parses the sources and runs the whole semantic analysis on them.
 --   A source that does not parse fails the test, since it is a broken test.
+-- | Analyzes modules as part of Std, which may use @Intrinsic and @number@.
 analyze :: [Text] -> IO (Either [SemError] AnalysisResult)
-analyze sources = do
+analyze = analyzeInPackage stdPackageName
+
+analyzeInPackage :: PackageName -> [Text] -> IO (Either [SemError] AnalysisResult)
+analyzeInPackage package sources = do
    let parsed = parseProgram "<test>" <$> sources
    unless (null (lefts parsed)) $
       assertFailure $
          "Parsing error occurred during semantic tests:\n"
             <> intercalate "\n" (map show (lefts parsed))
+   let programs = rights parsed
+   let packages = M.fromList [ (program.moduleDef.name, package) | program <- programs ]
    runExceptT $
       fullAnalysis
          (const (pure ()))
          (const (const (pure ())))
-         (rights parsed)
+         programs
+         packages
          Target64
+
+-- | Outside Std, the analysis rejects the program with an error satisfying the predicate.
+assertRejectedOutsideStd :: (SemError -> Bool) -> [Text] -> Assertion
+assertRejectedOutsideStd isExpected sources = analyzeInPackage "app" sources >>= \case
+   Right _     -> assertFailure "expected an error, but the analysis succeeded"
+   Left errors -> unless (any isExpected errors) $
+      assertFailure ("none of the errors is the expected one: " <> show errors)
 
 -- | The analysis accepts the program.
 assertAnalyzes :: [Text] -> Assertion
@@ -671,6 +687,17 @@ intrinsicDeclarationTests = TestList
       [ "@Intrinsic"
       , "extern fn opNeg (Int, Int) -> Int;"
       ]
+
+   , named "intrinsic outside Std" $ assertRejectedOutsideStd isIntrinsicOutsideStd $ inModule
+      [ "@Intrinsic"
+      , "extern fn opSub (Int, Int) -> Int;"
+      ]
+
+   , named "number in a signature outside Std" $ assertRejectedOutsideStd isIntrinsicTypeOutsideStd $ inModule
+      [ "extern fn twice (number) -> number;" ]
+
+   , named "concatenative in a type outside Std" $ assertRejectedOutsideStd isIntrinsicTypeOutsideStd $ inModule
+      [ "type Pair = Pair concatenative concatenative;" ]
    ]
 
 -- | A single module `T` whose operators take any number or concatenative type,
@@ -785,6 +812,10 @@ isNotAFunction = \case { SETypeCheckError (SENotAFunction {}) -> True; _ -> Fals
 isCtorArityMismatch = \case { SETypeCheckError (SECtorArityMismatch {}) -> True; _ -> False }
 isFnArityMismatch = \case { SETypeCheckError (SEFnArityMismatch {}) -> True; _ -> False }
 isSystemArityMismatch = \case { SETypeCheckError (SESystemArityMismatch {}) -> True; _ -> False }
+
+isIntrinsicOutsideStd, isIntrinsicTypeOutsideStd :: SemError -> Bool
+isIntrinsicOutsideStd = \case { SEModifierError (SEIntrinsicOutsideStd {}) -> True; _ -> False }
+isIntrinsicTypeOutsideStd = \case { SEDefinitionError (SEIntrinsicTypeOutsideStd {}) -> True; _ -> False }
 
 isUnknownIntrinsic, isIntrinsicArityMismatch :: SemError -> Bool
 isUnknownIntrinsic = \case { SEModifierError (SEUnknownIntrinsic {}) -> True; _ -> False }

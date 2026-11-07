@@ -222,11 +222,15 @@ reportAmbiguousConstraints :: SemAnalyzer ()
 reportAmbiguousConstraints = do
    constraints <- gets (M.toList . (.tyVarConstraints))
    unresolved <- filterM (isUnresolvedVar . fst) constraints
+   -- one error per expression, even if it introduced several variables
    let byOrigin = unresolved
          |> map snd
          |> nubBy ((==) `on` (.origin))
    forM_ byOrigin $ \constraint ->
-      errSem SEAmbiguousConstraint { location = constraint.origin, constraint = constraint.kind }
+      errSem SEAmbiguousConstraint
+         { location   = constraint.origin
+         , constraint = constraint.kind
+         }
 
 -- | Whether a type variable is unbound.
 isUnresolvedVar :: Int -> SemAnalyzer Bool

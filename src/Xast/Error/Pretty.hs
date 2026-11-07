@@ -48,6 +48,19 @@ instance PrintError XastError where
 
       in printReportAt filename report
 
+   printError (XastStdNotFound dir) =
+      printMessage
+         ("Std not found: no xast.toml in " <> dir)
+         [ Hint "Put std next to the xastc binary, or set XAST_STD to its directory" ]
+
+   printError (XastPackageCycle packages) =
+      let path = intercalate " -> " (map unpack packages)
+      in printMessage ("Packages depend on each other: " <> path) []
+
+   printError (XastDuplicateModule module_ firstPackage secondPackage) =
+      let packageNames = "`" <> unpack firstPackage <> "` and `" <> unpack secondPackage <> "`"
+      in printMessage ("Module `" <> show module_ <> "` is declared in both packages " <> packageNames) []
+
    printError (XastTomlDecodeError file e) = do
       let msg = pack (show (yellow (file <> ": "))) <> prettyTomlDecodeError e
       let report = Err Nothing msg [] []
@@ -237,6 +250,16 @@ instance PrintError ModifierError where
 
       in printReportAt filename report
 
+   printError (SEIntrinsicOutsideStd loc name) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ("Function " <> show (blue (show name)) <> " cannot be @Intrinsic outside Std")
+            [ (toPosition pos len filename, This "Marked @Intrinsic here") ]
+            [ Hint "Declare it as a plain extern function" ]
+
+      in printReportAt filename report
+
    printError (SEIntrinsicArityMismatch loc name expected actual) =
       let Location pos _ len = loc
           filename = sourceName pos
@@ -299,6 +322,16 @@ instance PrintError UndefinedError where
 
 instance PrintError DefinitionError where
    printError :: DefinitionError -> IO ()
+   printError (SEIntrinsicTypeOutsideStd loc kind) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ("`" <> typename (TyInt kind) <> "` can only be used in Std")
+            [ (toPosition pos len filename, This "Used here") ]
+            [ Hint "Use a concrete type, e.g. `Int`, or a generic" ]
+
+      in printReportAt filename report
+
    printError (SEMissingFnDef loc ident) =
       let Location pos _ len = loc
           filename = sourceName pos
@@ -664,6 +697,12 @@ constraintTypesNote TyConcat =
 -- | A name as it is written in messages, e.g. @`Int`@.
 quotedName :: Ident -> String
 quotedName name = "`" <> show name <> "`"
+
+-- | An error without a source location, e.g. a missing package.
+printMessage :: String -> [Note String] -> IO ()
+printMessage message notes =
+   let report = Err Nothing message [] notes
+   in printDiagnostic stdout WithUnicode (TabSize 4) defaultStyle (addReport mempty report)
 
 errReport :: String -> [(Position, Marker String)] -> [Note String] -> Report String
 errReport = Err Nothing

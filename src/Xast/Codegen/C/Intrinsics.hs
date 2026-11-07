@@ -51,19 +51,25 @@ intrinsicDefinitions = M.fromList
 binary :: (IntrinsicSite -> CExpr -> CExpr -> CExpr) -> IntrinsicDefinition
 binary operation = IntrinsicDefinition
    { arity = 2
-   , body  = \site -> case site.params of
-      [left, right] -> returning (operation site left right)
-      _             -> unreachableWith "a binary intrinsic instance without two parameters"
+   , body  = binaryBody operation
    }
+
+binaryBody :: (IntrinsicSite -> CExpr -> CExpr -> CExpr) -> IntrinsicSite -> [CStmt]
+binaryBody operation site = case site.params of
+   [left, right] -> returning (operation site left right)
+   _             -> unreachableWith "a binary intrinsic instance without two parameters"
 
 -- | One parameter; the body returns one expression.
 unary :: (IntrinsicSite -> CExpr -> CExpr) -> IntrinsicDefinition
 unary operation = IntrinsicDefinition
    { arity = 1
-   , body  = \site -> case site.params of
-      [operand] -> returning (operation site operand)
-      _         -> unreachableWith "a unary intrinsic instance without one parameter"
+   , body  = unaryBody operation
    }
+
+unaryBody :: (IntrinsicSite -> CExpr -> CExpr) -> IntrinsicSite -> [CStmt]
+unaryBody operation site = case site.params of
+   [operand] -> returning (operation site operand)
+   _         -> unreachableWith "a unary intrinsic instance without one parameter"
 
 returning :: CExpr -> [CStmt]
 returning result = [CReturn (Just result)]

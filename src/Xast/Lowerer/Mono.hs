@@ -66,6 +66,49 @@ requestType instance' = gets (M.lookup instance' . (.typeInsts)) >>= \case
          }
       pure kirName
 
+-- | The C name of a function at the types of one use. A generic function gets
+--   an instance per set of types, e.g. @Std_Option_isSome_Std_Num_Int@.
+requestFunction
+   :: QualifiedIdent
+   -> Type  -- ^ type at this use, e.g. @fn(Option Int) -> Bool@
+   -> Lowerer KirName
+requestFunction name usedType = do
+   template <- lookupFunctionTemplate name
+   let typeParams = bindTypeParams (signatureType template.signature) usedType
+   typeArgs <- mapM monoType (M.elems typeParams)
+   let instance' = TypeInst { name = name, args = typeArgs }
+
+   known <- gets (M.member instance' . (.funcInsts))
+   unless (M.null typeParams || known) $
+      enqueueFunction FunctionRequest { instance' = instance', typeParams = typeParams }
+   pure (KirName (mangle instance'))
+
+lookupFunctionTemplate :: QualifiedIdent -> Lowerer FunctionTemplate
+lookupFunctionTemplate name = gets (M.lookup name . (.funcTmpls)) >>= \case
+   Just found -> pure found
+   Nothing    -> error ("no template for function " ++ show name)
+
+-- | E.g. @fn(Option a) -> Bool@ for @fn isSome (Option a) -> Bool;@
+signatureType :: FuncDef -> Type
+signatureType funcDef = TyFn (map (.node) funcDef.args) funcDef.retType.node
+
+enqueueFunction :: FunctionRequest -> Lowerer ()
+enqueueFunction request = modify $ \state -> state
+   { funcInsts = M.insert request.instance' (KirName (mangle request.instance')) state.funcInsts
+   , funcQueue = state.funcQueue ++ [request]
+   }
+
+-- | Replaces each generic and @number@ by its type at one use,
+--   e.g. @Option a@ becomes @Option Int@ with @{ a ↦ Int }@.
+substituteTypeParams :: M.Map Type Type -> Type -> Type
+substituteTypeParams typeParams type' = case M.lookup type' typeParams of
+   Just bound -> bound
+   Nothing    -> case type' of
+      TyApp func arg   -> TyApp (substituteTypeParams typeParams func) (substituteTypeParams typeParams arg)
+      TyTuple elements -> TyTuple (map (substituteTypeParams typeParams) elements)
+      TyFn args result -> TyFn (map (substituteTypeParams typeParams) args) (substituteTypeParams typeParams result)
+      other            -> other
+
 -- | Requests an intrinsic instance for the types of one use.
 --   Named like type instances, e.g. @Std_Ops_opAdd_Std_Num_Int@.
 requestIntrinsic
@@ -81,9 +124,7 @@ requestIntrinsic decl usedType = do
    gets (M.lookup instance' . (.intrinsicInsts)) >>= \case
       Just existing -> pure existing.name
       Nothing -> do
-         (params, result) <- case usedType of
-            TyFn usedParams usedResult -> (,) <$> mapM monoType usedParams <*> monoType usedResult
-            other -> error ("intrinsic used at a non-function type " ++ show other)
+         (params, result) <- monoSignature usedType
          let definition = KirIntrinsicDef
                { name      = KirName (mangle instance')
                , intrinsic = decl.name.name
@@ -92,6 +133,16 @@ requestIntrinsic decl usedType = do
                }
          modify $ \state -> state { intrinsicInsts = M.insert instance' definition state.intrinsicInsts }
          pure definition.name
+
+-- | The monomorphic parameter and result types of a function type,
+--   e.g. @([Int, Int], Bool)@ for @fn(Int, Int) -> Bool@.
+monoSignature :: Type -> Lowerer ([Type], Type)
+monoSignature = \case
+   TyFn params result -> do
+      monoParams <- mapM monoType params
+      monoResult <- monoType result
+      pure (monoParams, monoResult)
+   other -> error ("function used at a non-function type " ++ show other)
 
 -- | Maps each generic, @number@ and @concatenative@ of a signature to its type
 --   at one use. Keyed by the declared type, so the order is stable.

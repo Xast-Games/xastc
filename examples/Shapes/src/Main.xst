@@ -1,0 +1,24 @@
+module Main exports *
+
+use Geometry *
+use Std.Option { isSome }
+
+fn totalCorners (Shape, Shape) -> Int;
+fn totalCorners first second = corners first + corners second;
+
+fn isPolygon (Shape) -> Bool;
+fn isPolygon shape = corners shape > 2 && !(corners shape == 0);
+
+fn remainder (Long, Long) -> Long;
+fn remainder value divisor = -(value % divisor);
+
+fn halfArea (Double) -> Double;
+fn halfArea side = area side side / 2.0;
+
+fn cornersOr (Option Shape, Int) -> Int;
+fn cornersOr shape fallback = match shape with
+    Some found -> corners found,
+    _          -> fallback;
+
+fn hasShape (Option Shape) -> Bool;
+fn hasShape shape = isSome shape;

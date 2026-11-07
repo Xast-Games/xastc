@@ -10,10 +10,13 @@ import Text.Megaparsec (runParser, errorBundlePretty)
 import Xast.Parser.Headers (module')
 import qualified Data.Bifunctor as Bifunctor
 import qualified Data.Text as T
+import qualified Data.Map as M
+import Data.Maybe (fromMaybe)
 
 data XastConfig = XastConfig
    { projectConfig   :: ProjectConfig
    , apiConfig       :: ApiConfig
+   , dependencies    :: M.Map PackageName Dependency  -- ^ Std is not listed: every package but std gets it
    }
    deriving (Eq, Show, Generic)
 
@@ -21,6 +24,20 @@ xastConfigCodec :: TomlCodec XastConfig
 xastConfigCodec = XastConfig
    <$> Toml.table projectConfigCodec "project"  .= (.projectConfig)
    <*> Toml.table apiConfigCodec     "api"      .= (.apiConfig)
+   <*> dependenciesCodec "dependencies"         .= (.dependencies)
+
+-- | A package this one uses, e.g. @physics = { path = "../physics" }@.
+newtype Dependency = Dependency
+   { path :: FilePath  -- ^ relative to the package that depends on it
+   }
+   deriving (Eq, Show, Generic)
+
+-- | An optional table of dependencies, empty when missing.
+dependenciesCodec :: Toml.Key -> TomlCodec (M.Map PackageName Dependency)
+dependenciesCodec key =
+   let dependencyCodec = Dependency <$> Toml.string "path" .= (.path)
+       tableCodec = Toml.tableMap Toml._KeyText (Toml.table dependencyCodec) key
+   in Toml.dimap Just (fromMaybe M.empty) (Toml.dioptional tableCodec)
 
 data ProjectConfig = ProjectConfig
    { name      :: Text
