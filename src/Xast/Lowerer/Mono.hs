@@ -66,7 +66,7 @@ requestType instance' = gets (M.lookup instance' . (.typeInsts)) >>= \case
          }
       pure kirName
 
--- | The C name of a function at the types of one use. A generic function gets
+-- | The name of a function at the types of one use. A generic function gets
 --   an instance per set of types, e.g. @Std_Option_isSome_Std_Num_Int@.
 requestFunction
    :: QualifiedIdent

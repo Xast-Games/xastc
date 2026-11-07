@@ -102,7 +102,7 @@ lowerCall resultType info name args = do
    let call = KirCall resultType callee args (Just resultName)
    pure ([call], KirVar resultName)
 
--- | The C name of a called function: prefixed with its declaring module, like
+-- | The name of a called function: prefixed with its declaring module, like
 --   its definition, and for a generic function, with its types here.
 --   Extern functions keep their own name.
 functionCallee

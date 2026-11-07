@@ -5,8 +5,11 @@ module Std.Prelude exports {
     -- Char:
     Char,
 
+    -- Error:
+    error,
+
     -- Function:
-    id, const
+    id, const,
 
     -- Num:
     Size,   USize,
@@ -44,17 +47,28 @@ module Std.Prelude exports {
     debugTrace,
 }
 
-use Std.Alloc *
-use Std.Bool *
-use Std.Error *
-use Std.Num *
-use Std.OptionResult *
-use Std.Prelude *
-use Std.String *
-use Std.BoolUtils *
-use Std.Char *
-use Std.Function *
-use Std.Ops *
-use Std.Option *
-use Std.Result *
-use Std.Trace *
+use Std.Bool { Bool, True, False }
+use Std.Error { error }
+use Std.Num {
+    Size,   USize,
+    Long,   ULong,
+    Int,    UInt,
+    Short,  UShort,
+    Byte,   UByte,
+    Float,  Double,
+}
+use Std.String { String }
+use Std.Char { Char }
+use Std.Function { id, const }
+use Std.Ops {
+    opAdd, opSub, opMul, opDiv, opMod, opPow, opNeg,
+    opEq, opNeq, opLt, opGt, opLe, opGe,
+    opAnd, opOr, opNot,
+    opPipe,
+    opConcat,
+    opBitwiseAnd, opBitwiseOr, opBitwiseXor, 
+    opShiftLeft, opShiftRight,
+}
+use Std.Option { Option, Some, None }
+use Std.Result { Result, Ok, Err }
+use Std.Trace { debugTrace }
