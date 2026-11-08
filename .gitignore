@@ -2,3 +2,5 @@
 /.vscode/
 /xastc/
 /xastc/*
+# Output of `xastc build`, in any project
+build/
