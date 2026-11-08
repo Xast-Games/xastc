@@ -390,3 +390,22 @@ Existing gaps that examples will hit: records, `if`, string literals and lambdas
 | Cloning inside every function at entry | Costs one clone per call even when the caller could hand the value over. Owned (`*`) parameters let the caller decide. |
 
 What carried over from the earlier drafts: the signature alone tells read from take, which gives the dependency information that parallel ECS systems need.
+
+## 10. Appendix: correspondence with Rust
+
+| Xast | Rust | Meaning |
+|---|---|---|
+| `() -> T` | `() -> T` | a new value |
+| `T -> T/U` | `&T -> T/U` | reading, or cloning |
+| `*T -> *T` | `&mut T -> ()` or `mut T -> T` | mutating, or threading |
+| `*T -> T/U` | `T -> T/U` | consuming, and maybe returning something |
+| `*T -> (U, *T)` | `&mut T -> U` or `mut T -> (U, T)` | mutating and reading, or threading and reading |
+
+### Rust shapes with no Xast counterpart
+
+| Rust | In Xast |
+|---|---|
+| `&T -> &U`, a borrow into the argument | Not expressible. Use a copy, or `withAt` with a callback (P10) |
+| `&'a mut T -> &'a mut U`, reborrows | `modifyAt` with a callback |
+| references stored in structs, lifetimes | Not expressible: a read parameter cannot be returned, stored or captured |
+| `Rc<T>` and shared mutation | Out of scope here (memory model) |
