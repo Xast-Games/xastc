@@ -39,19 +39,19 @@ A *second live name* for a value appears when the program:
 3. stores it in a record, list or other value, and the old name is still used afterwards;
 4. captures it in a lambda, and the old name is still used afterwards;
 5. passes it to a `*` parameter, and the old name is still used afterwards;
-6. takes a part out of a name that stays live: `let g = s.items` while `s` is used again.
+6. binds or hands on a field, `let g = s.items`, and `s.items` is still used afterwards, directly or through `s`.
 
 At each such point exactly one of these happens:
 
 | The old name is... | The type is... | Result |
 |---|---|---|
 | never used again | any | **move**: no copy, the new name takes over |
-| used again | copyable | **clone**: the new name gets its own copy (implicit, reported by `--report-clones`) |
+| used again | copyable | **clone**: the new name gets its own copy (implicit, reported by `--report-costs`) |
 | used again | not copyable | **compile error** |
 
 Passing a name to a bare (read) parameter creates no second name: the callee only reads.
 
-**Fields.** Moving a field out of a name that is dead afterwards is a move. Moving it out of a name that stays live is item 6, so it clones; the exception is a record update, which refills the field:
+**Fields.** A field is treated like a whole value. Passing `s.items` to a bare parameter is a read. Binding it, or handing it on in any of the ways above, is a second name: a move if `s.items` is not used again, otherwise a clone or an error by the table. A record update refills a field that was moved out:
 
 ```haskell
 type State = State { items : Grid, count : Int };
@@ -76,6 +76,8 @@ Here `s` is owned (`*`). `s.items` moves out into `set` and is refilled by the u
 
 A tuple in a result position is a list of results, not data.
 
+Function types and signatures carry the same marks: each argument is a type plus a uniqueness mark, and so is each result (`fn(*a, b) -> *a`). Two function types are equal only if their marks match.
+
 ### 2.4 What a signature says [decided]
 
 | Signature | Meaning |
@@ -95,7 +97,8 @@ Side effects are part of this: anything that changes the world takes its handle 
 - **`@Pod`**: bit-copyable. On a type defined in Xast it is **checked**: a single-constructor product of numbers and other `@Pod` types, or an enum of unit constructors. No ADTs, no generics, no zero-sized fields (they are removed from the layout). On an `extern` type it is a **promise** of the author: `@Pod extern type Int;`. `@Pod` implies `@Copyable`.
 - **Extern types are not copyable.** A copy of an opaque type is made by an ordinary extern function the programmer calls: `extern fn cloneVector (FFIVector) -> FFIVector`. The compiler never clones an opaque type on its own; a second name for one is an error.
 - A type with a non-copyable field is non-copyable.
-- A non-copyable value must be consumed **exactly once**: by a consuming function, by being returned, or by being handed on. Dropping it silently is an error. [proposed]
+- A type with **`@Drop(fn)`** is dropped at its last use: the compiler calls `fn` there (`memory.md`, 4).
+- A non-copyable type without `@Drop` must be consumed **exactly once**: by a consuming function, by being returned, or by being handed on. Dropping it silently is an error.
 
 ### 2.6 Implicit and explicit mode [decided]
 
@@ -236,7 +239,7 @@ let s = finish builder            -- fine
 let t = finish builder            -- error: `builder` was already consumed
 ```
 
-### P7. Extern functions and opaque types [decided, mapping partly proposed]
+### P7. Extern functions and opaque types [decided]
 
 **Problem.** An extern function has no Xast body, so the compiler cannot check what it does.
 
@@ -247,10 +250,10 @@ let t = finish builder            -- error: `builder` was already consumed
 
 | Xast | Native |
 |---|---|
-| `*T` parameter handed back in the result | passed as a pointer, changed in place; the "returned" value is the same object [decided] |
-| `*T` parameter not handed back (consumed) | passed by value; the native side takes ownership [proposed] |
-| bare `T` parameter | by value [proposed] |
-| a fresh result | returned by value [proposed] |
+| `*T` parameter handed back in the result | passed as a pointer, changed in place; the "returned" value is the same object |
+| `*T` parameter not handed back (consumed) | passed by value; the native side takes ownership |
+| bare `T` parameter | by value |
+| a fresh result | returned by value |
 
 ```haskell
 extern fn readInt (*Console) -> (Int, *Console);      -- int32_t readInt(Console* console);
@@ -293,7 +296,7 @@ fn step x g = set x 0 g;                                  -- clones g: it is a r
 foldl (.\acc x -> set x 0 acc) newGrid xs                 -- acc is a read parameter of the lambda: a clone for every element
 ```
 
-**Solution.** Declare the parameter with `*`: `fn step (Int, *Grid) -> Grid`. A function type carries the same marks (`fn(*a, b) -> a`), so `foldl` can take a callback that owns its accumulator. Small helpers can also be inlined (`@Inline` exists). [later: compiling each function in two versions]
+**Solution.** Declare the parameter with `*`: `fn step (Int, *Grid) -> Grid`. A function type carries the same marks (2.3), so `foldl` can take a callback that owns its accumulator. Small helpers can also be inlined (`@Inline` exists). [later: compiling each function in two versions]
 
 ### P10. Reading or changing a part of a container [decided as a direction]
 
@@ -316,7 +319,7 @@ The callback is a read, so `r` does not contain `inner`. If it does (`.\inner ->
 fn modifyAt (Int, *Vec (Vec a), fn(*Vec a) -> *Vec a) -> *Vec (Vec a);
 ```
 
-### P11. Branches [proposed]
+### P11. Branches [decided]
 
 **Problem.** A name that appears in both arms of an `if` is used twice in the text but once on each path.
 
@@ -343,9 +346,11 @@ If `v` is used after the `if`, both arms need a clone (copyable) or it is an err
 
 **Problem.** An edit that uses a name later can turn a move into an implicit clone, silently.
 
-**Solution.** `xastc check --report-clones` lists every clone the compiler inserted, with the reason and where the cost lands:
+**Solution.** One report, `xastc check --report-costs`, lists what the compiler inserted, in two sections. **Clones** lists every clone, with the reason and where the cost lands. **Allocations** lists every field the compiler boxes, and so which constructors allocate (`memory.md`, 8).
 
 ```
+clones
+
 Main.id  (Main.xst:3)
   clone of `v` : Grid           at 4:13   `v`
     why:  returned while the caller may still be using it
@@ -357,9 +362,18 @@ Main.paint  (Main.xst:8)
     cost: copies the Grid on EVERY call; paint calls itself, so once per iteration
 
 2 clones in 2 functions, 1 of them inside a recursive call
+
+allocations
+
+Main.List  (Main.xst:12)
+  boxed: second field of `Cons` : List a
+    why:  `List` contains itself
+    cost: every `Cons` allocates one node
+
+1 boxed field in 1 type
 ```
 
-A function that is not listed has no hidden copies. `why` names the line that forced the clone. `cost` is the part to watch: "once per call" is usually fine, "once per iteration" is worth fixing, usually by declaring the parameter with `*`.
+A function that is not listed under clones has no hidden copies. `why` names the line that forced the clone. `cost` is the part to watch: "once per call" is usually fine, "once per iteration" is worth fixing, usually by declaring the parameter with `*`.
 
 ### P15. Sharing one large value among many holders [out of scope]
 
@@ -369,22 +383,31 @@ Because every value has one owner, sharing a large immutable structure costs a c
 
 **Problem.** Systems should not return heterogeneous effect lists such as `((compA, compB), List Effect)`.
 
-**Solution.** Resources are non-copyable values, passed and handed back explicitly. In a system, `#( … )` is one entity, and resources follow after `|`:
+**Solution.** Resources are non-copyable values, passed and handed back explicitly. In a system, each `#( … )` is a query group (one entity), and resources follow after `|`:
 
 ```haskell
-extern type CommandBuffer;
+@Singleton extern type CommandBuffer;
+@Singleton extern type Console;
+@Singleton type Gravity = Gravity Float;
 fn spawn   (Components, *CommandBuffer) -> *CommandBuffer;
 fn pending (CommandBuffer) -> Int;                        -- a read
 
-system Render #(Pos), #(Camera) | *Console, Gravity -> (Pos, *Console);
+system Move #(Pos, Vel), #(Camera) | *Console, Gravity -> (
+    Pos,          -- group 1: Pos is written, Vel is read
+    (),           -- group 2: Camera is only read
+    *Console
+);
 ```
 
-- `*` marks a write and a bare name a read. The result lists the written components and the resources handed back, matched by `*` as in any function.
+- **Components** carry no `*`: a component is written if it is in the result and read otherwise.
+- **The result** is a tuple: one slot per query group, in order, then one slot per `*R`. A slot holds the components its group writes (a tuple if several), or `()` for none. Each slot may have a `--` comment. A tuple of one slot is the slot itself, so a system with one group and no `*R` keeps the current form: `system Move #(Pos, Velocity) -> Pos;`.
+- **Resources** after `|` keep `*`: `*R` is a write and a bare `R` a read. A resource type must be `@Singleton`; otherwise it is a compile error.
 - A system that receives `*R` **must hand it back**. If the body consumes it (`finish builder`), that step is fine, but the result then asks for a value that is gone: the use-after-move error of P6, at the result.
 - A system may create its own local non-copyable values and consume them (a `*File` opened and closed within one run).
 - A system could consume a received resource and return a *fresh* one of the same type. The rules accept that; whether it is acceptable is an ECS policy.
 - The signature tells read from write: two systems that only read a resource do not conflict, so they can run in parallel; any `*R` conflicts with every other user of `R`.
-- The type modifier `@Singleton` is parsed, but nothing in the analyzer or the lowerer uses it, and the binding source `SrcSingleton` exists in the intermediate representation without anything producing it.
+- **Overlapping groups.** If the components of one query group are all contained in another group, every entity that matches the larger group also matches the smaller one, so two groups can denote the same entity. That is a compile error: `#(A), #(A)` or `#(A, B), #(A)`. Tell the groups apart with tags: `#(Tag1, A), #(Tag2, A)`. An entity that carries both tags still matches both groups; that case cannot be seen at compile time and is the programmer's responsibility.
+- **Writes in a multi-group system.** A system with several query groups runs over their combinations, so a written component of one group can be written once per entity of another group (each `Enemy`'s `Transform` once per `Player`). That is the programmer's responsibility, but `@Parallel` on a system with several groups that writes any of them is an error, since such writes could race.
 
 ### P17. Fewer clones: lazy cloning [later]
 
@@ -396,7 +419,7 @@ let n = size b,            -- b is only read, and dead afterwards
 let c = set 0 5 a          -- a could have been written in place
 ```
 
-**Solution.** A later analysis may postpone the clone to the first write while another name is still live, tracking, per program point, how many other names share the storage (none, one, several or unknown; unknown means shared). It only **removes** clones and never changes what a program means. Because shared storage makes a wrong count a correctness bug, it must be conservative, and the eager rule stays as the reference to test it against. First step: a dry run in `--report-clones` that lists the clones it would remove ("`b` is only read: this clone could be a share"), so the gain is measured before anything is built. [later]
+**Solution.** A later analysis may postpone the clone to the first write while another name is still live, tracking, per program point, how many other names share the storage (none, one, several or unknown; unknown means shared). It only **removes** clones and never changes what a program means. Because shared storage makes a wrong count a correctness bug, it must be conservative, and the eager rule stays as the reference to test it against. First step: a dry run in `--report-costs` that lists the clones it would remove ("`b` is only read: this clone could be a share"), so the gain is measured before anything is built. [later]
 
 ## 5. What the compiler does
 
@@ -412,37 +435,30 @@ The result is a table keyed by the source position of each second name ("move", 
 
 ## 6. Settled and open
 
-**Settled in the discussion** (and reflected above): `*` is a parameter mode and not a type; **clones are eager**, resolved at the second name, and lazy cloning is a later optimization (P17); no run-time counters; shadowing is prohibited (use fresh names, split long functions); tail calls will be guaranteed; `@Copyable` is an explicit opt-in; `@Pod` is allowed for enums of unit constructors; an extern `T -> T` is legal and means "returns a new value"; opaque types are cloned by an explicit extern function; the system syntax in P16; implicit and explicit mode per package, with `copy` and `boxed` as keywords (2.6).
+**Settled in the discussion** (and reflected above): `*` is a parameter mode and not a type; function types and signatures carry the marks, results too (2.3); **clones are eager**, resolved at the second name, and lazy cloning is a later optimization (P17); a field is treated like a whole value (2.2); no run-time counters; shadowing is prohibited (use fresh names, split long functions); tail calls will be guaranteed; `@Copyable` is an explicit opt-in; `@Pod` is allowed for enums of unit constructors; `@Drop(fn)`, or else consumed exactly once (2.5); an extern `T -> T` is legal and means "returns a new value"; opaque types are cloned by an explicit extern function; the native mapping (P7); branches (P11); the system syntax and `@Singleton` resources (P16); one report, `--report-costs` (P14); implicit and explicit mode per package, with `copy` and `boxed` as keywords (2.6).
 
 **Not decided:**
 
-1. **Function types with `*`** (P9): assumed to carry the marks of their parameters, and two function types are equal only if their marks match.
-2. **Exactly once** for non-copyable values (2.5): proposed.
-3. **Parts of non-copyable records** (2.2): moving a field out of a record you own is a move, and reading a field of a live non-copyable record is an error. Proposed.
-4. **Native mapping** beyond the write-in-place case (P7): consumed arguments, bare arguments and fresh results are proposed only.
-5. **Systems with several entities and several written outputs** (P16): today a system writes exactly one binding, and the lowerer stops with "a system must write exactly one binding for now".
-6. **`@Singleton`** (P16): to be wired, if a resource is a `@Singleton` type.
-7. **Destructors** for opaque types that own memory. See [memory.md](memory.md).
-8. **A counted, opt-in shared type** (P15): later, with persistent data structures.
-9. **Lint levels** (error, warning, silent) for redundant `copy` and `boxed`, in `xast.toml`: later.
-10. **`xastc fix`** to switch a package between the modes (2.6): an idea.
+1. **A counted, opt-in shared type** (P15): later, with persistent data structures.
+2. **Lint levels** (error, warning, silent) for redundant `copy` and `boxed`, in `xast.toml`: later.
+3. **`xastc fix`** to switch a package between the modes (2.6): an idea.
 
 ## 7. Related decisions
 
-- *Memory management* is in [memory.md](memory.md): no garbage collector, one owner per value, freeing at the last use of the owner, no escaping lambdas that capture values, indirection through `Std.Alloc`.
-- `Std.Alloc` primitives (`ptrWrite`, `ptrCopy`, ...) are where in-place mutation of raw storage is implemented. They are unsafe and outside this model.
+- *Memory management* is in [memory.md](memory.md): no garbage collector, one owner per value, freeing at the last use of the owner, `@Drop` for opaque types that own memory, no escaping lambdas that capture values, indirection through `Std.Alloc`.
+- The `Std.Alloc` intrinsics (`alloc`, `realloc`, `free`, `ptrRead`, `ptrWrite`, `ptrOffset`, `ptrCopy`, `ptrMove`) and `sizeOf` are where in-place mutation of raw storage is implemented. They are unsafe and outside this model.
 
 ## 8. Implementation plan
 
 1. **Copyability** in the type checker: `@Copyable` as an explicit opt-in with the field check, `@Pod` checked on Xast types and trusted on extern types. Annotate the Std types (`Int`, `Float`, `Char`, `Bool`, `Option`, `Result`, `List`, ...).
-2. **Parameter modes**: parse `*` on parameters and on a handed-back result, carry it in the AST and in function types, and check the rules in 2.3.
+2. **Parameter modes**: parse `*` on parameters and on a handed-back result. Function types and signatures carry `[Arg]` (a type plus a uniqueness mark), and results do too. Check the rules in 2.3.
 3. **The analysis pass**: liveness per path and field path, second names, summaries, the table, errors with two markers. The main piece.
 4. **Clone insertion** in lowering for `@Copyable` types, plus a clone operation in the intermediate representation and the backend.
 5. **A loop construct** in the intermediate representation and self tail calls compiled to it.
-6. **`--report-clones`.**
+6. **`--report-costs`**: the clones section (the allocations section is in `memory.md`).
 7. **Std**: `Vec` with `*` parameters, `withAt` and `modifyAt`.
 8. **The native mapping** in the backend (P7).
-9. **ECS resources and the system syntax** (P16).
+9. **ECS resources and the system syntax** (P16): the result slots, the `@Singleton` check, the overlapping-groups error, the `@Parallel` check. Today `@Singleton` is parsed but unused, `SrcSingleton` is never produced, and the lowerer accepts only one written binding.
 10. **The modes** (2.6): the `[ownership]` table in `xast.toml`, the keywords `copy` and `boxed`, and their errors and warnings.
 11. **Later:** the lazy-clone dry run and, if it pays off, the optimization (P17).
 
@@ -453,7 +469,7 @@ Existing gaps that examples will hit: records, `if`, string literals and lambdas
 | Alternative | Why it was not chosen |
 |---|---|
 | `*T` as a type | Mutation is behavior, not data: `Option *T` or `Box *T` make no sense. It also needs conversions between `T` and `*T` and wrapper functions. |
-| Inference only, no `*` in the source | Cannot say that a function takes ownership, cannot mark side effects, and the cost of an edit is invisible. The `*` parameter mode and the clone report keep both. |
+| Inference only, no `*` in the source | Cannot say that a function takes ownership, cannot mark side effects, and the cost of an edit is invisible. The `*` parameter mode and the cost report keep both. |
 | A separate read-only reference mode (`&`) | A bare parameter is already the read, checked by the rules in 2.2. |
 | Threading every read through the result: `get : …, *Vec a -> (Maybe a, *Vec a)` | Only needed for non-copyable types, where reads are effectful anyway. Copyable types read with a plain `T -> U`. |
 | A `@NoClone` function modifier | A `*` parameter already gives the guarantee. |

@@ -1,0 +1,34 @@
+\documentclass[14pt,a4paper]{extreport}
+\input{config/config}
+\input{config/macros}
+\input{config/info}
+
+\begin{document}
+    \pagenumbering{gobble}
+    \input{templates/titlepage}
+    \input{templates/individual_task}
+    \input{templates/schedule}
+
+    \tableofcontents
+    \newpage
+
+    \pagenumbering{arabic}
+    \setcounter{page}{1}
+
+    \include{chapters/annotation}
+    \include{chapters/abbreviations}
+    \include{chapters/introduction}
+    \include{chapters/analysis}
+    \include{chapters/language_design}
+    \include{chapters/implementation}
+    \include{chapters/testing}
+    \include{chapters/conclusion}
+
+    \renewcommand\bibname{СПИСОК ВИКОРИСТАНИХ ДЖЕРЕЛ}
+    \addcontentsline{toc}{chapter}{СПИСОК ВИКОРИСТАНИХ ДЖЕРЕЛ}
+    \nocite{*} % лише поки в тексті немає \cite: показує всі джерела з bibliography.bib
+    \bibliographystyle{config/gost2008}
+    \bibliography{config/bibliography}
+
+    \include{chapters/appendices}
+\end{document}

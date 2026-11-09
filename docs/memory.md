@@ -13,8 +13,9 @@ Each item is marked:
 
 - **No garbage collector.** [decided]
 - **Static ownership.** Every heap value has exactly one owner at any point, and the compiler knows it from liveness. There are no run-time counters in values. [decided]
+- **Freeing at the last use** of the owner; `@Drop(fn)` for opaque types that own memory (section 4). [decided]
 - **Lambdas that capture values must not escape** (be returned or stored). [decided]
-- **Memory for indirection comes from `Std.Alloc`.** Whatever creates a pointer (a recursive type, mutually recursive types) allocates and frees through `Std.Alloc` (`alloc`, `free`, `ptrRead`, ...), never through an allocator private to the backend. [decided]
+- **Memory for indirection comes from `Std.Alloc`.** Whatever creates a pointer (a recursive type, mutually recursive types) allocates and frees through `Std.Alloc` (section 4), never through an allocator private to the backend. [decided]
 - **The compiler inserts the pointer for recursive types**; nothing is added to the source (section 8). [decided]
 
 ## 2. The idea: one owner
@@ -27,14 +28,14 @@ The consequences are the ones Rust gets from ownership: freeing at a known point
 
 | Use | What it does | Status |
 |---|---|---|
-| **Freeing** | Free the storage at the last use of its owner | proposed |
+| **Freeing** | Free the storage at the last use of its owner | decided |
 | **Memory reuse** | A cell that dies is reused for a new value of the same layout | proposed, later |
 | **In-place mutation** | A `*` parameter owns its argument and mutates it | decided, in `uniqueness.md` |
 | **Stack allocation** | A value that never escapes does not need the heap | open, later |
 | **Parallel safety** | No two names share storage, so two systems cannot write the same value; values that are only read can be read concurrently | proposed |
 | **No cycles** | Values are trees of owned parts, so they cannot form cycles. `RawPtr` can break this, and it is outside the model | proposed |
 
-## 4. Freeing [proposed]
+## 4. Freeing [decided]
 
 At the last use of a name, its storage is freed there unless ownership is handed on (a move, a `*` argument, a return).
 
@@ -46,9 +47,17 @@ in n
 
 - Branches may free in different places: each arm frees what dies in it.
 - A record whose fields were partly moved out frees the rest of its fields when the record dies.
-- A **non-copyable resource** is not freed implicitly. It must be consumed (`uniqueness.md` 2.5), and the consuming function (`close`) is its destructor.
-- An **opaque type that owns memory** (`Vec`, `String`) needs a declared way to free it. [open]
-- The free itself is an `Std.Alloc` call. The `free` intrinsic is not defined in the compiler yet.
+- An **opaque type that owns memory** (`Vec`, `String`) declares its destructor with `@Drop(fn)`, and the compiler calls it at the last use:
+
+```haskell
+@Drop(freeVec) extern type Vec a;
+extern fn freeVec (*Vec a) -> ();
+```
+
+- A **non-copyable type without `@Drop`** (a resource such as `File`) is not freed implicitly. It must be consumed (`uniqueness.md` 2.5), and the consuming function (`close`) is its destructor.
+- The free itself is an `Std.Alloc` call.
+
+**`Std.Alloc`.** `RawPtr` is an untyped pointer, and offsets are in bytes. The compiler provides the intrinsics of `Std.Alloc` (`alloc`, `realloc`, `free`, `ptrRead`, `ptrWrite`, `ptrOffset`, `ptrCopy`, `ptrMove`) plus `sizeOf`. `sizeOf` takes a value only as a witness for its type: `sizeOf x` is the size of the type of `x`. All of them are unsafe and outside this model.
 
 ## 5. Reuse [proposed, later]
 
@@ -77,9 +86,10 @@ The questions are whether it needs an atomic counter for use across threads, and
 
 | Situation | Cost |
 |---|---|
-| a name used twice, copyable type | one clone, reported by `--report-clones` |
+| a name used twice, copyable type | one clone, in the clones section of `--report-costs` |
 | a name used twice, non-copyable type | a compile error |
 | a read-only alias `let b = a` while `a` is used later | one clone that a later optimization may remove (`uniqueness.md`, P17) |
+| a constructor with a boxed field | one allocation, in the allocations section of `--report-costs` |
 | several holders of one large value | a copy each, until the opt-in shared type exists |
 
 ## 8. Recursive types [decided]
@@ -90,26 +100,25 @@ The questions are whether it needs an atomic counter for use across threads, and
 
 **Ownership.** A boxed child is owned by its parent: copying the parent copies the nodes (`@Copyable` needs the boxed type to be copyable), and freeing the parent frees them, with the compiler generating that code.
 
-**Visibility and modes.** By default the allocation is implicit, so it must be reportable, as clones are: a report of which fields are boxed and therefore which constructors allocate. [open: a separate flag, or part of `--report-clones`] A package can instead require the annotation: with `explicit_boxing = true` in its `xast.toml`, every field the rule boxes must be marked `boxed`, and a missing mark is an error; in the default mode `boxed` is allowed but redundant. Both modes produce the same layout. See `uniqueness.md`, 2.6.
+**Visibility and modes.** By default the allocation is implicit, so it is reported, as clones are: the allocations section of `--report-costs` lists which fields are boxed and therefore which constructors allocate (`uniqueness.md`, P14). A package can instead require the annotation: with `explicit_boxing = true` in its `xast.toml`, every field the rule boxes must be marked `boxed`, and a missing mark is an error; in the default mode `boxed` is allowed but redundant. Both modes produce the same layout. See `uniqueness.md`, 2.6.
 
-A type with no constructor that avoids the recursion (`type Bad = Bad Bad`) has no finite value. A warning for it is proposed.
+A type with no constructor that avoids the recursion (`type Bad = Bad Bad`) has no finite value, and is an error.
 
 Not chosen: an explicit `Box` type (construction and patterns would have to wrap and unwrap). The marker on the field exists, but only as the optional `boxed` keyword of the explicit mode.
 
 ## 9. Open questions
 
 1. **The opt-in shared type** (section 6), together with persistent data structures.
-2. **Destructors for opaque types** that own memory: a way to declare one.
-3. **Reporting the implicit allocation of recursive types**: the flag (section 8).
-4. **Free at the last use, or at the end of the scope?** For plain memory the difference cannot be observed; for resources it can. The proposal is the last use.
-5. **Arena or region allocation**, and stack allocation of values that never escape.
-6. **The backend's code for freeing**, and the `Std.Alloc` intrinsics it needs. `alloc` and `free` are declared but have no definition in the compiler, and `RawPtr` and the meaning of its offsets are not defined yet.
-7. **`RawPtr`**: it is unsafe, outside this model, and the one way to create cycles.
+2. **Arena or region allocation**, and stack allocation of values that never escape.
+3. **Cycles through `RawPtr`**: it is unsafe, outside this model, and the one way to create them.
 
 ## 10. Plan
 
 1. The ownership analysis in `uniqueness.md` (its step 3).
-2. Insert frees after the analysis, once the `Std.Alloc` intrinsics exist.
-3. Box recursive fields by the rule in section 8, in the layout of type definitions.
-4. Reuse of dead cells.
-5. The opt-in shared type, with persistent data structures.
+2. Define the `Std.Alloc` intrinsics in the compiler (`alloc`, `realloc`, `free`, `ptrRead`, `ptrWrite`, `ptrOffset`, `ptrCopy`, `ptrMove`) and `sizeOf`.
+3. Parse `@Drop(fn)` on types.
+4. Insert frees after the analysis: generated code for types defined in Xast, the `@Drop` function for opaque types.
+5. Box recursive fields by the rule in section 8, in the layout of type definitions, and report types with no finite value as errors.
+6. The allocations section of `--report-costs`.
+7. Reuse of dead cells.
+8. The opt-in shared type, with persistent data structures.
