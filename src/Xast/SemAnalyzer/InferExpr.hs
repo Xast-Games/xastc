@@ -245,11 +245,15 @@ typeLetBinds imports [] body = ([],) <$> inferType imports body
 typeLetBinds imports (Let pattern value : rest) body = do
    typedValue  <- inferType imports value
    (typedPattern, patternVars) <- inferPattern imports (typeOf typedValue) pattern
-   generalizedVars <- case pattern of
-      PatVar {} -> forM patternVars $ \varInfo -> do
-         quantifiedVars <- generalize varInfo.ty
-         pure varInfo { quantified = quantifiedVars }
-      _ -> pure patternVars
+   -- every name the pattern binds, e.g. both `g` and `h` in `let (g, h) = …`
+   generalizedVars <- mapM generalizeVar patternVars
 
    (typedRest, typedBody) <- withVars generalizedVars (typeLetBinds imports rest body)
    pure (Let typedPattern typedValue : typedRest, typedBody)
+
+-- | Makes a let-bound name polymorphic in the type variables only it uses,
+--   e.g. @g : fn(t0) -> t0@ becomes @∀t0. fn(t0) -> t0@.
+generalizeVar :: VarInfo -> SemAnalyzer VarInfo
+generalizeVar varInfo = do
+   quantifiedVars <- generalize varInfo.ty
+   pure varInfo { quantified = quantifiedVars }

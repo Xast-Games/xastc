@@ -67,6 +67,11 @@ acceptedTests = TestList
       , "fn f = let id = .\\x -> x, let a = id True, let b = id 12 in b;"
       ]
 
+   , named "function bound by a tuple pattern used at two types" $ assertAnalyzes $ inModule
+      [ "fn f () -> Int;"
+      , "fn f = let (g, h) = (.\\x -> x, .\\y -> y), let a = g True, let b = g 12 in b;"
+      ]
+
    , named "list literal" $ assertAnalyzes $ inModule
       [ "extern type List a;"
       , "fn f () -> Int;"
@@ -515,6 +520,40 @@ exhaustivenessTests = TestList
    , named "match missing a constructor" $ assertRejected isNonExhaustiveMatch $ inModule
       [ "fn f (Bool) -> Int;"
       , "fn f b = match b with True -> 1;"
+      ]
+
+   , named "clauses missing a nested constructor" $ assertRejected isNonExhaustiveMatch $ inModule
+      [ "type Shape = Square | Circle;"
+      , "type Slot = Full Shape | Empty;"
+      , "fn f (Slot) -> Int;"
+      , "fn f (Full Square) = 1;"
+      , "fn f Empty = 2;"
+      ]
+
+   , named "clauses covering each column but not every combination" $ assertRejected isNonExhaustiveMatch $ inModule
+      [ "fn f (Bool, Bool) -> Int;"
+      , "fn f True False = 1;"
+      , "fn f False True = 2;"
+      ]
+
+   , named "match on literals without a wildcard" $ assertRejected isNonExhaustiveMatch $ inModule
+      [ "fn f (Int) -> Int;"
+      , "fn f n = match n with 1 -> 10, 2 -> 20;"
+      ]
+
+   , named "clauses covering nested constructors" $ assertAnalyzes $ inModule
+      [ "type Shape = Square | Circle;"
+      , "type Slot = Full Shape | Empty;"
+      , "fn f (Slot, Bool) -> Int;"
+      , "fn f (Full Square) _ = 1;"
+      , "fn f (Full _) True = 2;"
+      , "fn f _ _ = 3;"
+      ]
+
+   , named "partial match on a @NonExhaustive type" $ assertAnalyzes $ inModule
+      [ "@NonExhaustive type Key = Up | Down;"
+      , "fn f (Key) -> Int;"
+      , "fn f k = match k with Up -> 1;"
       ]
    ]
 

@@ -308,8 +308,7 @@ data TypeCheckError
       }
    | SENonExhaustiveMatch
       { location     :: Location
-      , typeName     :: TypeName
-      , missingCtors :: [CtorName]
+      , missingCases :: [Text]  -- ^ values no arm matches, e.g. @Some Square@
       }
    deriving Show
 

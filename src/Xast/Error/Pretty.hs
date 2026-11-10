@@ -593,14 +593,14 @@ instance PrintError TypeCheckError where
 
       in printReportAt filename report
 
-   printError (SENonExhaustiveMatch loc tyIdent missingCtors) =
+   printError (SENonExhaustiveMatch loc missingCases) =
       let Location pos _ len = loc
           filename = sourceName pos
-          missingList = intercalate ", " (map show missingCtors)
+          missingList = intercalate ", " (map (show . blue . unpack) missingCases)
           report = errReport
-            ("Non-exhaustive match on " <> show (blue (show tyIdent)) <> ": missing " <> missingList)
-            [ (toPosition pos len filename, This "Not every constructor is covered here") ]
-            [ Hint "Add arms for the missing constructors, add a wildcard/variable arm, or mark the type @NonExhaustive." ]
+            ("Non-exhaustive match: not covered " <> missingList)
+            [ (toPosition pos len filename, This "Some values match no arm here") ]
+            [ Hint "Add arms for the missing cases, add a wildcard/variable arm, or mark the type @NonExhaustive." ]
 
       in printReportAt filename report
 
