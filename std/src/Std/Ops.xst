@@ -48,9 +48,6 @@ extern fn opOr (Bool, Bool) -> Bool;
 extern fn opNot (Bool) -> Bool;
 
 -- @Intrinsic
-extern fn opPipe (a, fn(a) -> b) -> b;
-
--- @Intrinsic
 extern fn opConcat (concatenative, concatenative) -> concatenative;
 
 @Intrinsic

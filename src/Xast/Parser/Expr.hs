@@ -249,7 +249,7 @@ table =
    ,  [ InfixR (binary OpAnd) ]
    ,  [ InfixR (binary OpOr) ]
 
-   ,  [ InfixL (binary OpPipe) ]
+   ,  [ InfixL pipeRight ]
    ,  [ InfixL (binary OpConcat) ]
 
    ,  [ InfixR applyLeft ]
@@ -270,6 +270,14 @@ applyLeft = do
       let Location posF offF _ = exprLoc f
           Location _ offX lenX = exprLoc x
       in ExpApp (ParsedInfo (Location posF offF ((offX + lenX) - offF))) f x
+
+pipeRight :: Parser (Expr Parsed -> Expr Parsed -> Expr Parsed)
+pipeRight = do
+   _ <- symbol (opToken OpPipe)
+   pure $ \x f ->
+      let Location posX offX _ = exprLoc x
+          Location _ offF lenF = exprLoc f
+      in ExpApp (ParsedInfo (Location posX offX ((offF + lenF) - offX))) f x
 
 -- | Like `binary`, but the token must not be immediately followed by any of
 -- `forbidden` — used to keep `<`/`>` from swallowing the first char of a

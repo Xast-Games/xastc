@@ -27,54 +27,74 @@ data Location = Location
 sortLocByPos :: Location -> Location -> Ordering
 sortLocByPos a b = compare a.pos b.pos
 
+-- | A modifier's name, without its arguments, e.g. @\@Label@ for @\@Label(Physics)@.
 displayModifier :: Modifier -> String
 displayModifier = \case
-   FnMod (ModSharedVariant _)       -> "@SharedVariant"
-   FnMod ModMemoize                 -> "@Memoize"
-   FnMod ModInline                  -> "@Inline"
-   FnMod (ModDeprecated _)          -> "@Deprecated"
-   FnMod ModSupUnreachable          -> "@SuppressUnreachable"
-   FnMod ModCompileTime             -> "@CompileTime"
-   SysMod (ModCompDispatchMode _)   -> "@Mode"
-   SysMod (ModLabel _)              -> "@Label"
-   SysMod ModParallel               -> "@Parallel"
-   TypeMod ModSingleton             -> "@Singleton"
-   TypeMod ModCopyable              -> "@Copyable"
-   TypeMod ModTag                   -> "@Tag"
-   TypeMod ModNonExhaustive         -> "@NonExhaustive"
-   ExtFnMod ModIntrinsic            -> "@Intrinsic"
-data Modifier 
-   = FnMod FnModifier
-   | SysMod SysModifier
-   | TypeMod TypeModifier
-   | ExtFnMod ExtFnModifier
-   deriving (Eq, Show)
+   ModSharedVariant _      -> "@SharedVariant"
+   ModMemoize              -> "@Memoize"
+   ModInline               -> "@Inline"
+   ModDeprecated _         -> "@Deprecated"
+   ModSupUnreachable       -> "@SuppressUnreachable"
+   ModCompileTime          -> "@CompileTime"
+   ModCompDispatchMode _   -> "@Mode"
+   ModLabel _              -> "@Label"
+   ModParallel             -> "@Parallel"
+   ModSingleton            -> "@Singleton"
+   ModCopyable _           -> "@Copyable"
+   ModTag                  -> "@Tag"
+   ModNonExhaustive        -> "@NonExhaustive"
+   ModIntrinsic            -> "@Intrinsic"
 
-data ExtFnModifier
-   = ModIntrinsic
-   deriving (Eq, Show)
-
-data FnModifier
+-- | An annotation written before a declaration, e.g. @\@Inline@.
+data Modifier
    = ModSharedVariant Ident
    | ModMemoize
    | ModInline
    | ModDeprecated Text
    | ModSupUnreachable
    | ModCompileTime
-   deriving (Eq, Show)
-
-data SysModifier
-   = ModCompDispatchMode ComponentDispatchMode
+   | ModCompDispatchMode ComponentDispatchMode
    | ModLabel Ident
    | ModParallel
-   deriving (Eq, Show)
-
-data TypeModifier
-   = ModSingleton
-   | ModCopyable
+   | ModSingleton
+   | ModCopyable (Maybe FunctionName)  -- ^ with the function that copies it, e.g. @\@Copyable(cloneVec)@
    | ModTag
    | ModNonExhaustive
+   | ModIntrinsic
    deriving (Eq, Show)
+
+-- | A kind of declaration that modifiers can be written on.
+data ModifierTarget
+   = OnFunction
+   | OnExternFunction
+   | OnSystem
+   | OnType
+   deriving (Eq, Show)
+
+-- | Where a modifier may be written, e.g. @\@Inline@ on functions and extern functions.
+modifierTargets :: Modifier -> [ModifierTarget]
+modifierTargets = \case
+   ModSharedVariant _      -> [OnFunction]
+   ModMemoize              -> [OnFunction]
+   ModInline               -> [OnFunction, OnExternFunction]
+   ModDeprecated _         -> [OnFunction]
+   ModSupUnreachable       -> [OnFunction]
+   ModCompileTime          -> [OnFunction, OnExternFunction]
+   ModCompDispatchMode _   -> [OnSystem]
+   ModLabel _              -> [OnSystem]
+   ModParallel             -> [OnSystem]
+   ModSingleton            -> [OnType]
+   ModCopyable _           -> [OnType]
+   ModTag                  -> [OnType]
+   ModNonExhaustive        -> [OnType]
+   ModIntrinsic            -> [OnExternFunction]
+
+displayTarget :: ModifierTarget -> String
+displayTarget = \case
+   OnFunction       -> "a function"
+   OnExternFunction -> "an extern function"
+   OnSystem         -> "a system"
+   OnType           -> "a type"
 
 data ComponentDispatchMode
    = CDMStrict

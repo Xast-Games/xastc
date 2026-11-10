@@ -26,8 +26,6 @@ module Std.Prelude exports {
     opEq, opNeq, opLt, opGt, opLe, opGe,
     -- # logical:
     opAnd, opOr, opNot,
-    -- # functional:
-    opPipe,
     -- # arrays:
     opConcat,
     -- # bitwise:
@@ -64,7 +62,6 @@ use Std.Ops {
     opAdd, opSub, opMul, opDiv, opMod, opPow, opNeg,
     opEq, opNeq, opLt, opGt, opLe, opGe,
     opAnd, opOr, opNot,
-    opPipe,
     opConcat,
     opBitwiseAnd, opBitwiseOr, opBitwiseXor, 
     opShiftLeft, opShiftRight,

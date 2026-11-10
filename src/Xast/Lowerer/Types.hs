@@ -104,7 +104,7 @@ data KirIntrinsicDef = KirIntrinsicDef
 data KirTypeDef = KirTypeDef
    { name  :: KirName
    , ctors :: [KirCtor]
-   , mods  :: [TypeModifier]
+   , mods  :: [Modifier]
    }
    deriving Show
 

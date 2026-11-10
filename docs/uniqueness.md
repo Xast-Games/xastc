@@ -94,7 +94,8 @@ Side effects are part of this: anything that changes the world takes its handle 
 ### 2.5 Copyable types [decided]
 
 - **`@Copyable`** is an explicit opt-in on a regular type: the programmer decides that it may be cloned implicitly. All its fields must be copyable, or it is an error. Tuples are copyable when their elements are.
-- **`@Pod`**: bit-copyable. On a type defined in Xast it is **checked**: a single-constructor product of numbers and other `@Pod` types, or an enum of unit constructors. No ADTs, no generics, no zero-sized fields (they are removed from the layout). On an `extern` type it is a **promise** of the author: `@Pod extern type Int;`. `@Pod` implies `@Copyable`.
+- **`@Copyable(fn)`** names the function that copies the type, `fn : (T) -> T`. It is required for a type with `@Drop`, because such a type owns memory through a pointer, and copying its fields would give two owners of one buffer (`memory.md`, 9). The compiler calls `fn` wherever a clone happens, including `copy e`. Plain `@Copyable` on a type with `@Drop` is an error.
+- **`@Pod`**: bit-copyable. On a type defined in Xast it is **checked**: a single-constructor product of numbers and other `@Pod` types, or an enum of unit constructors. No ADTs, no generics, no zero-sized fields (they are removed from the layout). On an `extern` type it is a **promise** of the author: `@Pod extern type Int;`. `@Pod` implies `@Copyable`. **`@Pod` and `@Drop` exclude each other**: a type that frees something owns it, so a bit copy is never a valid copy of it. `RawPtr` is `@Pod`: its copy is a copy of the address, and it owns nothing.
 - **Extern types are not copyable.** A copy of an opaque type is made by an ordinary extern function the programmer calls: `extern fn cloneVector (FFIVector) -> FFIVector`. The compiler never clones an opaque type on its own; a second name for one is an error.
 - A type with a non-copyable field is non-copyable.
 - A type with **`@Drop(fn)`** is dropped at its last use: the compiler calls `fn` there (`memory.md`, 4).
@@ -421,6 +422,34 @@ let c = set 0 5 a          -- a could have been written in place
 
 **Solution.** A later analysis may postpone the clone to the first write while another name is still live, tracking, per program point, how many other names share the storage (none, one, several or unknown; unknown means shared). It only **removes** clones and never changes what a program means. Because shared storage makes a wrong count a correctness bug, it must be conservative, and the eager rule stays as the reference to test it against. First step: a dry run in `--report-costs` that lists the clones it would remove ("`b` is only read: this clone could be a share"), so the gain is measured before anything is built. [later]
 
+### P18. Operators and `<>` on collections [decided]
+
+**Problem.** `<>` should work on the Std collections, both on a value at its last use and on one still in use, and every new collection should not need a new mechanism. Letting user types define operators (`@Concat(fn)`, `@Add(fn)`) would amount to traits, which the language avoids.
+
+**Solution.**
+- **Operators belong to Std.** `number` and `concatenative` stay closed kinds, as in Java or Go. Std types are added to them; user types never are. Math types (`Vec3`, `Mat4`) use named functions and pipes: `Mat.identity |> Mat.mul m2 |> Mat.addVec v2`.
+- **`concatenative`** holds `String`, `List`, `Vec`, `RRB` and `ChunkedVec` (`memory.md`, 9). Maps, sets and queues come later.
+- **One signature for both cases**, taking both operands:
+
+```haskell
+@Intrinsic
+extern fn opConcat (*concatenative, *concatenative) -> concatenative;
+```
+
+The caller moves an operand at its last use and clones it otherwise, as for any `*` parameter (P1). There are no separate operators for owned values:
+
+| At `a <> b` | What happens |
+|---|---|
+| both dead afterwards | `b` is appended into `a`'s storage: O(\|b\|) for `Vec`, O(log n) relinking for `RRB` |
+| `a` used later | `a` is cloned first, which costs what building a new value would |
+| `b` used later | `b` is cloned, then its elements move |
+| non-copyable elements | they move; a read-only right operand could only copy them |
+
+The right operand is taken so that non-copyable elements can move. For `String` this costs a clone of `b` when it is still used, where a read would do; removing it is a later optimization (P17).
+
+- **Chains** such as `a <> b <> c <> d` grow the left buffer several times. A later optimization can compute the total size and allocate once, as Java does for string concatenation. [later]
+- **`|>` is syntax, not a function** [decided, implemented]: the parser turns `x |> f` into `f x`. A function `opPipe (a, fn(a) -> b) -> b` would accept only reading functions, since the marks are part of function types (2.3), so `v |> push 1` could not type-check, and its bare `a` passed on to a `*` parameter would clone (P5). As plain application, the ordinary rules apply, and `x |> f 1` needs no partial application.
+
 ## 5. What the compiler does
 
 For each function body, after type checking and desugaring, a new pass:
@@ -435,13 +464,15 @@ The result is a table keyed by the source position of each second name ("move", 
 
 ## 6. Settled and open
 
-**Settled in the discussion** (and reflected above): `*` is a parameter mode and not a type; function types and signatures carry the marks, results too (2.3); **clones are eager**, resolved at the second name, and lazy cloning is a later optimization (P17); a field is treated like a whole value (2.2); no run-time counters; shadowing is prohibited (use fresh names, split long functions); tail calls will be guaranteed; `@Copyable` is an explicit opt-in; `@Pod` is allowed for enums of unit constructors; `@Drop(fn)`, or else consumed exactly once (2.5); an extern `T -> T` is legal and means "returns a new value"; opaque types are cloned by an explicit extern function; the native mapping (P7); branches (P11); the system syntax and `@Singleton` resources (P16); one report, `--report-costs` (P14); implicit and explicit mode per package, with `copy` and `boxed` as keywords (2.6).
+**Settled in the discussion** (and reflected above): `*` is a parameter mode and not a type; function types and signatures carry the marks, results too (2.3); **clones are eager**, resolved at the second name, and lazy cloning is a later optimization (P17); a field is treated like a whole value (2.2); no run-time counters; shadowing is prohibited (use fresh names, split long functions); tail calls will be guaranteed; `@Copyable` is an explicit opt-in; `@Pod` is allowed for enums of unit constructors; `@Drop(fn)`, or else consumed exactly once (2.5); an extern `T -> T` is legal and means "returns a new value"; opaque types are cloned by an explicit extern function; the native mapping (P7); branches (P11); the system syntax and `@Singleton` resources (P16); one report, `--report-costs` (P14); implicit and explicit mode per package, with `copy` and `boxed` as keywords (2.6); `@Copyable(fn)` for types with `@Drop`, and `@Pod` excluding `@Drop` (2.5); operators only on Std types, and `<>` taking both operands, `|>` as plain application (P18).
 
 **Not decided:**
 
 1. **A counted, opt-in shared type** (P15): later, with persistent data structures.
 2. **Lint levels** (error, warning, silent) for redundant `copy` and `boxed`, in `xast.toml`: later.
 3. **`xastc fix`** to switch a package between the modes (2.6): an idea.
+4. **Higher-order functions and modes.** `Option.map (fn(a) -> b, Option a)` cannot take a `fn(*a) -> *a`. Either separate functions per mode (as `withAt` and `modifyAt` in P10) or signatures polymorphic in the mode.
+5. **`@Copyable(fn)` on extern types**: whether an opaque type may name its copy function, or stays copied only by explicit calls (2.5).
 
 ## 7. Related decisions
 
@@ -450,7 +481,7 @@ The result is a table keyed by the source position of each second name ("move", 
 
 ## 8. Implementation plan
 
-1. **Copyability** in the type checker: `@Copyable` as an explicit opt-in with the field check, `@Pod` checked on Xast types and trusted on extern types. Annotate the Std types (`Int`, `Float`, `Char`, `Bool`, `Option`, `Result`, `List`, ...).
+1. **Copyability** in the type checker: `@Copyable` as an explicit opt-in with the field check, `@Copyable(fn)` (parsed already) with its signature check, `@Pod` checked on Xast types and trusted on extern types, and `@Pod` with `@Drop` rejected. Annotate the Std types (`Int`, `Float`, `Char`, `Bool`, `Option`, `Result`, `List`, ...).
 2. **Parameter modes**: parse `*` on parameters and on a handed-back result. Function types and signatures carry `[Arg]` (a type plus a uniqueness mark), and results do too. Check the rules in 2.3.
 3. **The analysis pass**: liveness per path and field path, second names, summaries, the table, errors with two markers. The main piece.
 4. **Clone insertion** in lowering for `@Copyable` types, plus a clone operation in the intermediate representation and the backend.
@@ -460,7 +491,8 @@ The result is a table keyed by the source position of each second name ("move", 
 8. **The native mapping** in the backend (P7).
 9. **ECS resources and the system syntax** (P16): the result slots, the `@Singleton` check, the overlapping-groups error, the `@Parallel` check. Today `@Singleton` is parsed but unused, `SrcSingleton` is never produced, and the lowerer accepts only one written binding.
 10. **The modes** (2.6): the `[ownership]` table in `xast.toml`, the keywords `copy` and `boxed`, and their errors and warnings.
-11. **Later:** the lazy-clone dry run and, if it pays off, the optimization (P17).
+11. **Operators** (P18): `opConcat` with `*` operands; `concatenative` extended with the Std collections, through a Std-only marker instead of type names in the compiler.
+12. **Later:** the lazy-clone dry run and, if it pays off, the optimization (P17); concatenation chains with one allocation (P18).
 
 Existing gaps that examples will hit: records, `if`, string literals and lambdas are not yet lowered.
 

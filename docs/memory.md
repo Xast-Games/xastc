@@ -17,6 +17,7 @@ Each item is marked:
 - **Lambdas that capture values must not escape** (be returned or stored). [decided]
 - **Memory for indirection comes from `Std.Alloc`.** Whatever creates a pointer (a recursive type, mutually recursive types) allocates and frees through `Std.Alloc` (section 4), never through an allocator private to the backend. [decided]
 - **The compiler inserts the pointer for recursive types**; nothing is added to the source (section 8). [decided]
+- **Std collections are built in Xast on `Std.Alloc`**, with the unsafe code only in the bottom layer; `String` is a `Vec Byte` (section 9). [decided]
 
 ## 2. The idea: one owner
 
@@ -47,17 +48,19 @@ in n
 
 - Branches may free in different places: each arm frees what dies in it.
 - A record whose fields were partly moved out frees the rest of its fields when the record dies.
-- An **opaque type that owns memory** (`Vec`, `String`) declares its destructor with `@Drop(fn)`, and the compiler calls it at the last use:
+- A **type that owns memory** through a `RawPtr` declares its destructor with `@Drop(fn)`, and the compiler calls it at the last use. Such a type is copied only by the function named in `@Copyable(fn)` (`uniqueness.md`, 2.5):
 
 ```haskell
-@Drop(freeVec) extern type Vec a;
-extern fn freeVec (*Vec a) -> ();
+@Drop(dropVec) @Copyable(cloneVec)
+type Vec a = Vec { data : RawPtr, len : USize, cap : USize };
+
+fn dropVec (*Vec a) -> ();
 ```
 
 - A **non-copyable type without `@Drop`** (a resource such as `File`) is not freed implicitly. It must be consumed (`uniqueness.md` 2.5), and the consuming function (`close`) is its destructor.
 - The free itself is an `Std.Alloc` call.
 
-**`Std.Alloc`.** `RawPtr` is an untyped pointer, and offsets are in bytes. The compiler provides the intrinsics of `Std.Alloc` (`alloc`, `realloc`, `free`, `ptrRead`, `ptrWrite`, `ptrOffset`, `ptrCopy`, `ptrMove`) plus `sizeOf`. `sizeOf` takes a value only as a witness for its type: `sizeOf x` is the size of the type of `x`. All of them are unsafe and outside this model.
+**`Std.Alloc`.** `RawPtr` is an untyped pointer, and offsets are in bytes. It is `@Pod`: copying it copies the address, which is harmless because a pointer alone owns nothing. Ownership belongs to the type that holds it and declares `@Drop`. The compiler provides the intrinsics of `Std.Alloc` (`alloc`, `realloc`, `free`, `ptrRead`, `ptrWrite`, `ptrOffset`, `ptrCopy`, `ptrMove`) plus `sizeOf`. `sizeOf` takes a value only as a witness for its type: `sizeOf x` is the size of the type of `x`. All of them are unsafe and outside this model.
 
 ## 5. Reuse [proposed, later]
 
@@ -106,13 +109,74 @@ A type with no constructor that avoids the recursion (`type Bad = Bad Bad`) has 
 
 Not chosen: an explicit `Box` type (construction and patterns would have to wrap and unwrap). The marker on the field exists, but only as the optional `boxed` keyword of the explicit mode.
 
-## 9. Open questions
+## 9. Std collections [decided]
 
-1. **The opt-in shared type** (section 6), together with persistent data structures.
+**Which.** Std provides the sequences that cover most uses; maps, sets and queues come later.
+
+| Type | Storage | Good for |
+|---|---|---|
+| `Vec a` | one contiguous, growable buffer | the default: building data, loops, indexing, appending |
+| `RRB a` | a relaxed radix balanced tree | concatenation, splitting, slicing and insertion in O(log n) |
+| `ChunkedVec a` | contiguous blocks | large data with localized writes, such as voxel chunks |
+| `String` | a `Vec Byte` holding UTF-8 | text |
+
+All of them are concatenative, so `<>` works on them (`uniqueness.md`, P18). With one owner per value they are changed in place by their owner; there is no separate mutable variant. Cheap snapshots of `RRB` and `ChunkedVec`, which share nodes or chunks, wait for the shared type (section 6); until then a clone copies.
+
+**Layers.** Unsafe code stays at the bottom:
+
+1. `Std.Alloc`: raw memory, unsafe.
+2. `Vec`: a buffer of initialized elements, with `@Drop` and `@Copyable(fn)` written by hand.
+3. `String`, the nodes of `RRB`, the chunks of `ChunkedVec`: built from `Vec`, so they get its destructor and its copy without writing their own.
+
+**`Vec` layout.** Three words, `{ data, len, cap }`, with the elements on the heap, as in Rust. Only the first `len` slots are initialized. When it is full, the capacity doubles (0 → 4 → 8 → 16 → …), so pushing n elements costs O(n) in total. `grow` takes the vector with `*`, so `realloc` may extend the buffer in place: nobody else can hold a pointer to it.
+
+```haskell
+fn push (a, *Vec a) -> *Vec a;
+fn push x v =
+    let room = if v.len == v.cap then grow v else v,
+    let _ = ptrWrite room.data (room.len * elemSize room) x
+    in room { len = room.len + 1 };
+
+fn grow (*Vec a) -> *Vec a;
+fn grow v =
+    let newCap = if v.cap == 0 then 4 else v.cap * 2
+    in v { data = realloc v.data (newCap * elemSize v), cap = newCap };
+```
+
+**Drop and copy.** `dropVec` drops each element, then frees the buffer. `cloneVec` allocates `len` slots and copies the bytes in one go when the element type is `@Pod`; otherwise it copies each element with its own copy, which is what makes `Vec (Vec Int)` correct:
+
+```haskell
+fn cloneVec (Vec a) -> Vec a;
+fn cloneVec v =
+    let target = Vec { data = alloc (v.len * elemSize v), len = 0, cap = v.len }
+    in if isPod v                 -- known per instance after monomorphization
+        then copyBytes v target
+        else cloneEach 0 v target;
+
+fn cloneEach (USize, Vec a, *Vec a) -> *Vec a;
+fn cloneEach i source target =
+    if i == source.len then target
+    else cloneEach (i + 1) source (push (copy (at i source)) target);
+```
+
+**`String`.** A record over `Vec Byte` with no `@Drop` of its own: the field is dropped and copied by `Vec`'s functions, so `String` derives `@Copyable` like any record. Appending reuses the left buffer:
+
+```haskell
+@Copyable type String = String { bytes : Vec Byte };
+
+fn appendString (*String, String) -> String;
+fn appendString left right = left { bytes = append left.bytes right.bytes };
+```
+
+## 10. Open questions
+
+1. **The opt-in shared type** (section 6), together with persistent data structures and cheap snapshots of `RRB` and `ChunkedVec`.
 2. **Arena or region allocation**, and stack allocation of values that never escape.
 3. **Cycles through `RawPtr`**: it is unsafe, outside this model, and the one way to create them.
+4. **Std-only helpers** the collections need: `elemSize` (the size of an element type) and `isPod` (whether it is bit-copyable, known per instance).
+5. **Hiding fields**: the fields of `Vec` must not be reachable from user code, which needs private fields or a way to export a type without them.
 
-## 10. Plan
+## 11. Plan
 
 1. The ownership analysis in `uniqueness.md` (its step 3).
 2. Define the `Std.Alloc` intrinsics in the compiler (`alloc`, `realloc`, `free`, `ptrRead`, `ptrWrite`, `ptrOffset`, `ptrCopy`, `ptrMove`) and `sizeOf`.
@@ -122,3 +186,4 @@ Not chosen: an explicit `Box` type (construction and patterns would have to wrap
 6. The allocations section of `--report-costs`.
 7. Reuse of dead cells.
 8. The opt-in shared type, with persistent data structures.
+9. `Vec`, `String` over `Vec Byte`, then `RRB` and `ChunkedVec` (section 9), after `@Drop`, `@Copyable(fn)` and the `Std.Alloc` intrinsics.

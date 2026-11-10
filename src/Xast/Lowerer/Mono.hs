@@ -176,7 +176,7 @@ requestTagTypes = do
 -- | A non-generic type marked @Tag (generic tags are rejected by the semantic analyzer).
 isTagTemplate :: TypeDef -> Bool
 isTagTemplate template =
-   let tag = TypeMod ModTag `elem` template.modifiers
+   let tag = ModTag `elem` template.modifiers
    in tag && null template.generics
 
 drainTypes :: Lowerer ()
@@ -243,13 +243,8 @@ buildUserTypeDef instance' = do
    return KirTypeDef 
       { name = KirName (mangle instance')
       , ctors = ctors 
-      , mods = template.modifiers |> map asTypeModifier
+      , mods = template.modifiers
       }
-
-asTypeModifier :: Modifier -> TypeModifier
-asTypeModifier = \case
-   TypeMod m -> m
-   _ -> error "Cannot extract non-type modifier as type"
 
 -- | Name of a constructor once its type has been instantiated: the name of that
 --   type instance followed by the constructor's own name (@A Int@, @B@ -> @Main_A_Int_B@),

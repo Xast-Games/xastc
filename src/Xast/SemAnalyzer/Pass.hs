@@ -74,7 +74,7 @@ collectIntrinsics programs symTable = M.fromList
    [ (externId, intrinsicDecl program extern)
    | program <- programs
    , StmtExtern (ExtFunc extern) <- program.stmts
-   , ExtFnMod ModIntrinsic `elem` extern.modifiers
+   , ModIntrinsic `elem` extern.modifiers
    , Just moduleInfo <- [M.lookup program.moduleDef.name symTable.modules]
    , Just (SymbolExternFn _ externId _) <- [M.lookup extern.name moduleInfo.symbols]
    ]

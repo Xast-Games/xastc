@@ -9,11 +9,11 @@ import Xast.Parser.Ident (fnIdent)
 import Xast.Parser.Expr (expr, atomPattern')
 import Xast.Parser.Common
 import Xast.AST
-import Xast.Parser.Modifier (fnModifier, noRepeatedModifiers)
+import Xast.Parser.Modifier (modifierOn, noRepeatedModifiers)
 
 func :: Parser (Func Parsed)
 func = do
-   modifiers <- many fnModifier >>= noRepeatedModifiers
+   modifiers <- many (modifierOn OnFunction) >>= noRepeatedModifiers
    if null modifiers
       then (FnDef <$> funcDef modifiers) <-> (FnImpl <$> funcImpl)
       else FnDef <$> funcDef modifiers

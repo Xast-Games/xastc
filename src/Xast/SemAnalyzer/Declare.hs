@@ -101,7 +101,7 @@ declareType ident typeDef@(TypeDef loc modifiers _ generics ctors) = do
    QualifiedName currentModule _ <- qualify ident
    let owner = QualifiedIdent { moduleName = Just currentModule, name = ident }
        ctorNames = S.fromList [ctor.name | ctor <- ctors]
-       typeSig = TypeSig ctorNames generics (TypeMod ModNonExhaustive `elem` modifiers)
+       typeSig = TypeSig ctorNames generics (ModNonExhaustive `elem` modifiers)
 
    case [ctor | ctor <- ctors, ctor.name == ident] of
       [selfCtor] -> do
@@ -129,7 +129,7 @@ declareType ident typeDef@(TypeDef loc modifiers _ generics ctors) = do
 -- | A @Tag type is a plain marker component, so it must look like @type X = X;@.
 checkTagType :: TypeDef -> SemAnalyzer ()
 checkTagType typeDef =
-   let isTag = TypeMod ModTag `elem` typeDef.modifiers
+   let isTag = ModTag `elem` typeDef.modifiers
        invalidTag = SEInvalidTagType typeDef.location typeDef.name
    in when (isTag && not (isPlainMarker typeDef)) $
          errSem invalidTag
@@ -140,7 +140,7 @@ checkIntrinsic :: ExternFunc -> SemAnalyzer ()
 checkIntrinsic extern = do
    moduleName <- gets (.currentModule)
    inStd <- isStdModule moduleName
-   let isIntrinsic = ExtFnMod ModIntrinsic `elem` extern.modifiers
+   let isIntrinsic = ModIntrinsic `elem` extern.modifiers
    when (isIntrinsic && not inStd) $
       errSem (SEIntrinsicOutsideStd extern.location extern.name)
    when (isIntrinsic && inStd) $

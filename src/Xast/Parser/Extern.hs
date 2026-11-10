@@ -8,14 +8,14 @@ import Xast.AST
 import Xast.Parser.Type (type')
 import Xast.Parser.Ident
 import Xast.Parser.Common (endOfStmt, Parser, symbol, (<->), withLoc, located)
-import Xast.Parser.Modifier (extFnModifier, noRepeatedModifiers)
+import Xast.Parser.Modifier (modifierOn, noRepeatedModifiers)
 
 extern :: Parser Extern
 extern = (ExtFunc <$> externFunc) <-> (ExtType <$> externType)
 
 externFunc :: Parser ExternFunc
 externFunc = do
-   modifiers <- many extFnModifier >>= noRepeatedModifiers
+   modifiers <- many (modifierOn OnExternFunction) >>= noRepeatedModifiers
    externFuncDef modifiers
 
 externFuncDef :: [Modifier] -> Parser ExternFunc

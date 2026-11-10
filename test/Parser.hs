@@ -444,10 +444,16 @@ exprTests = TestLabel "Expr (atoms)" $ TestList
    , TestCase $
       assertParses expr "a |> f" $
          ExpApp info
-               (ExpApp info
-                     (ExpVar info Nothing (Ident "opPipe"))
-                     (ExpVar info Nothing (Ident "a")))
                (ExpVar info Nothing (Ident "f"))
+               (ExpVar info Nothing (Ident "a"))
+
+   , TestCase $
+      assertParses expr "v |> push 1" $
+         ExpApp info
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "push"))
+                     (ExpLit info (LitInt (int 1))))
+               (ExpVar info Nothing (Ident "v"))
 
    , TestCase $
       assertParses expr "a <> b" $
@@ -522,14 +528,10 @@ exprTests = TestLabel "Expr (atoms)" $ TestList
    , TestCase $
       assertParses expr "a |> b |> c" $
          ExpApp info
-               (ExpApp info
-                     (ExpVar info Nothing (Ident "opPipe"))
-                     (ExpApp info
-                           (ExpApp info
-                                 (ExpVar info Nothing (Ident "opPipe"))
-                                 (ExpVar info Nothing (Ident "a")))
-                           (ExpVar info Nothing (Ident "b"))))
                (ExpVar info Nothing (Ident "c"))
+               (ExpApp info
+                     (ExpVar info Nothing (Ident "b"))
+                     (ExpVar info Nothing (Ident "a")))
 
    , TestCase $
       assertParses expr "a ** b ** c" $
@@ -944,8 +946,22 @@ functionTests = TestLabel "Functions" $ TestList
 
 typeDefTests :: Test
 typeDefTests = TestLabel "Type definitions" $ TestList
-   -- Unit constructor
+   -- Modifiers
    [ TestCase $
+      assertParsesIgnoringLocations withTestLocationTypeDef typeDef
+         "@Copyable(cloneVec) type Vec = Vec;"
+         (TypeDef
+               testLocation
+               [ModCopyable (Just (Ident "cloneVec"))]
+               (Ident "Vec")
+               []
+               [ Ctor testLocation (Ident "Vec") PUnit ])
+
+   , TestCase $
+      assertFails typeDef "@Intrinsic type Vec = Vec;"
+
+   -- Unit constructor
+   , TestCase $
       assertParsesIgnoringLocations withTestLocationTypeDef typeDef
          "type Bool = True | False;"
          (TypeDef
@@ -1101,6 +1117,23 @@ externTests = TestLabel "Extern" $ TestList
                     (Ident "panic")
                     []
                   (loc $ unresolvedType $ Ident "Never"))
+
+   , TestCase $
+      assertParsesIgnoringLocations withTestLocationExtern extern
+         "@Intrinsic @Inline @CompileTime extern fn opAdd(number, number) -> number;"
+         (ExtFunc $
+            ExternFunc
+                  testLocation
+                  [ModIntrinsic, ModInline, ModCompileTime]
+                  (Ident "opAdd")
+                  [loc (TyInt TyNumber), loc (TyInt TyNumber)]
+                  (loc (TyInt TyNumber)))
+
+   , TestCase $
+      assertFails extern "@Parallel extern fn f() -> Int;"
+
+   , TestCase $
+      assertFails extern "@Inline @Inline extern fn f() -> Int;"
 
    -- Extern types
    , TestCase $
@@ -1308,7 +1341,7 @@ systemTests = TestLabel "Systems" $ TestList
          (SysDef $
             SystemDef
                   testLocation
-                  [SysMod $ ModLabel $ Ident "Physics"]
+                  [ModLabel $ Ident "Physics"]
                   (Ident "Move")
                   []
                   (loc $ TyTuple [])

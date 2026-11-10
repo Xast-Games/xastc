@@ -11,12 +11,12 @@ import Xast.Parser.Ident (typeIdent)
 import Xast.Parser.Type (type')
 import Xast.Parser.Expr (expr, atomPattern')
 import Xast.AST
-import Xast.Parser.Modifier (sysModifier, noRepeatedModifiers)
+import Xast.Parser.Modifier (modifierOn, noRepeatedModifiers)
 
 system :: Parser (System Parsed)
 system = do
    hasLabel  <- lookAhead (optional (symbol "@label"))
-   modifiers <- many sysModifier >>= noRepeatedModifiers
+   modifiers <- many (modifierOn OnSystem) >>= noRepeatedModifiers
    if isJust hasLabel || not (null modifiers)
       then SysDef <$> systemDef modifiers
       else (SysDef <$> systemDef modifiers) <-> (SysImpl <$> systemImpl)
