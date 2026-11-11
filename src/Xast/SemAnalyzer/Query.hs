@@ -40,15 +40,38 @@ lookupExported :: Module -> Ident -> SemAnalyzer (Maybe SymbolInfo)
 lookupExported module' ident = do
    modules <- gets (.modules)
    case exportOrigin modules module' ident of
-      Just origin -> lookupInModule origin ident
+      Just origin -> fmap (seenThrough modules module' ident) <$> lookupInModule origin ident
       Nothing     -> pure Nothing
 
 -- | A symbol a module declares or re-exports.
 lookupThrough :: Module -> Ident -> SemAnalyzer (Maybe SymbolInfo)
 lookupThrough module' ident = do
+   modules <- gets (.modules)
    declared <- lookupInModule module' ident
    exported <- lookupExported module' ident
-   pure (declared <|> exported)
+   pure (seenThrough modules module' ident <$> (declared <|> exported))
+
+-- | A symbol as other modules see it: a type exported without its
+--   same-named constructor, e.g. @Vec@, cannot be used as that constructor.
+seenThrough :: M.Map Module ModuleInfo -> Module -> Ident -> SymbolInfo -> SymbolInfo
+seenThrough modules module' ident symbol =
+   let isAbstract = case M.lookup module' modules of
+         Just moduleInfo -> ident `S.member` moduleInfo.abstractTypes
+         Nothing         -> False
+   in if isAbstract then fromMaybe symbol (asType symbol) else symbol
+
+-- | Whether the current module may use a field of a record type: its own
+--   types' fields always, others' only if their module exports them.
+fieldVisible :: QualifiedIdent -> FieldName -> SemAnalyzer Bool
+fieldVisible typeName fieldName = do
+   current <- gets (.currentModule)
+   modules <- gets (.modules)
+   pure $ case typeName.moduleName of
+      Just declaring | declaring /= current ->
+         let exported = M.lookup declaring modules
+               >>= (M.lookup typeName.name . (.exportedFields))
+         in maybe False (S.member fieldName) exported
+      _ -> True
 
 -- | Look up a symbol in the current module
 lookupCurrentModule :: Ident -> SemAnalyzer (Maybe SymbolInfo)

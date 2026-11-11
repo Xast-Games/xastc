@@ -199,12 +199,18 @@ codegenFn :: KirFunction -> CCodegen CFunction
 codegenFn func = do
    let linkage = CExternal
    let ty = typeToCType func.retTy
-   let KirName name = func.name
+   let name = cFunctionName func.name
    let args = [CFuncArg { ty = typeToCType param.ty, name = paramName } | param <- func.params, let KirName paramName = param.name]
 
    body <- codegenBlock func.body
 
    return CFunction {..}
+
+-- | A function name as a C identifier: @'@ is not allowed in C, so
+--   @Main_map'@ becomes @Main_map_prime@. Xast names have no @_@, so this
+--   cannot clash with another function.
+cFunctionName :: KirName -> Text
+cFunctionName functionName = T.replace "'" "_prime" functionName.text
 
 codegenSystem :: KirSystem -> CCodegen CFunction
 codegenSystem system = do
@@ -264,12 +270,12 @@ codegenInstruct :: KirInstruct -> CCodegen [CStmt]
 codegenInstruct = \case
    KirCall 
       { ty = retType
-      , callee = KirName fnName
+      , callee = callee
       , args = callArgs
       , out = out 
       } -> do
          let callArguments = callArgs |> map (CExprArg . valueToExpr)
-         let invocation = CInvoke (CVar fnName) callArguments
+         let invocation = CInvoke (CVar (cFunctionName callee)) callArguments
          case out of
             Just (KirName resultName) ->
                pure [CDeclStmt (typeToCType retType) resultName (Just invocation)]

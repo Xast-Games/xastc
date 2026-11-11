@@ -134,7 +134,7 @@ withCtorFieldTypes ctor symbol =
 -- | Changes a symbol of the current module in place.
 updateSymbol :: Ident -> (SymbolInfo -> SymbolInfo) -> SemAnalyzer ()
 updateSymbol ident change = modify $ \symTable ->
-   let changeModule (ModuleInfo symbols exports) = ModuleInfo (M.adjust change ident symbols) exports
+   let changeModule moduleInfo = moduleInfo { symbols = M.adjust change ident moduleInfo.symbols }
    in symTable { modules = M.adjust changeModule symTable.currentModule symTable.modules }
 
 payloadTypes :: Payload -> [Located Type]

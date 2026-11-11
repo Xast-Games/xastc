@@ -2,7 +2,7 @@
 module Xast.Parser.Ident where
 
 import Data.Text (Text, pack, unpack)
-import Text.Megaparsec.Char (upperChar, lowerChar, alphaNumChar)
+import Text.Megaparsec.Char (upperChar, lowerChar, alphaNumChar, char)
 import Text.Megaparsec
 
 import Xast.Parser.Common
@@ -48,8 +48,9 @@ pascalCase = lexeme $ do
    rest  <- many alphaNumChar
    return $ Ident (pack (first:rest))
 
+-- | A lowercase name; it may contain @'@, as in @map'@, the unique variant of @map@.
 camelCase :: Parser Ident
 camelCase = lexeme $ do
    first <- lowerChar
-   rest  <- many alphaNumChar
+   rest  <- many (alphaNumChar <|> char '\'')
    return $ Ident (pack (first:rest))

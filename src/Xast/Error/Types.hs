@@ -57,6 +57,16 @@ data ImportError
       , location     :: Location
       , invalidNames :: [Ident]     -- ^ exported names the module does not declare
       }
+   | SEExportedCtorAlone
+      { location :: Location
+      , ctorName :: CtorName
+      , typeName :: TypeName        -- ^ the type to export it through, e.g. @Option(Some)@
+      }
+   | SEInvalidExportMembers
+      { location :: Location
+      , typeName :: TypeName
+      , members  :: [Ident]         -- ^ listed names that are not its constructors or fields
+      }
    | SEAmbiguousAlias
       { alias          :: Ident
       , firstLocation  :: Location
@@ -292,6 +302,11 @@ data TypeCheckError
       , ctorName  :: CtorName
       , fieldName :: FieldName
       }
+   | SEHiddenField
+      { location  :: Location
+      , typeName  :: QualifiedIdent
+      , fieldName :: FieldName
+      }
    | SENotARecordType
       { location  :: Location
       , valueType :: Type
@@ -320,6 +335,10 @@ data SemWarning
    = SWUnusedImport Module
    | SWDeadCode Ident
    | SWRedundantImport ImportIntersection
+   | SWMisplacedPrime
+      { location :: Location
+      , name     :: Ident   -- ^ e.g. @map'wrong@
+      }
    | SWFunctionGayness
       { location  :: Location
       , name      :: Ident

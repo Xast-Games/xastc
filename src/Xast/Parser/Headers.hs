@@ -21,8 +21,21 @@ moduleDef = withLoc $ do
 
 exportPayload :: Parser ExportPayload
 exportPayload = choice
-   [ ExpSelect <$> between (symbol "{") (symbol "}") ((typeIdent <|> fnIdent) `sepEndBy1` symbol ",")
+   [ ExpSelect <$> between (symbol "{") (symbol "}") (exportItem `sepEndBy1` symbol ",")
    , ExpFull   <$ symbol "*"
+   ]
+
+-- | @inc@, @Vec@, @Option(..)@ or @Player(Player, name)@.
+exportItem :: Parser ExportItem
+exportItem = choice
+   [ ExportItem <$> typeIdent <*> (exportMembers <|> pure NoMembers)
+   , ExportItem <$> fnIdent <*> pure NoMembers
+   ]
+
+exportMembers :: Parser ExportMembers
+exportMembers = between (symbol "(") (symbol ")") $ choice
+   [ AllMembers  <$ symbol ".."
+   , SomeMembers <$> (typeIdent <|> fnIdent) `sepEndBy1` symbol ","
    ]
 
 importDef :: Parser (Located ImportDef)

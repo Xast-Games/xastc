@@ -6,6 +6,7 @@ import Control.Monad.State
 import Control.Monad (forM_, unless, when)
 import qualified Data.Set as S
 import qualified Data.Map as M
+import qualified Data.Text as T
 import Xast.AST
 import Xast.Error.Types
 import Xast.SemAnalyzer.Monad
@@ -90,6 +91,7 @@ declareFn ident funcDef@(FuncDef loc _ fnIdent fnArgs _) = do
    let argsCount = length fnArgs
    when (argsCount > 6) $
       warnSem (SWFunctionGayness loc fnIdent argsCount)
+   warnMisplacedPrime loc fnIdent
 
    functionId <- freshFunctionId
    declareSymbol ident (SymbolFn loc functionId (funcSig funcDef)) SEFnRedeclaration
@@ -133,6 +135,18 @@ checkTagType typeDef =
        invalidTag = SEInvalidTagType typeDef.location typeDef.name
    in when (isTag && not (isPlainMarker typeDef)) $
          errSem invalidTag
+
+-- | @'@ is only for the unique variant of a function, as its last character: @map'@.
+warnMisplacedPrime :: Location -> Ident -> SemAnalyzer ()
+warnMisplacedPrime location name =
+   when (hasMisplacedPrime name) $
+      warnSem (SWMisplacedPrime location name)
+
+-- | E.g. @map'wrong@ or @map''@, but not @map'@.
+hasMisplacedPrime :: Ident -> Bool
+hasMisplacedPrime name =
+   let withoutLast = T.dropEnd 1 name.inner
+   in T.any (== '\'') withoutLast
 
 -- | An @Intrinsic declaration must be in Std and match a compiler definition,
 --   including arity.
@@ -194,6 +208,7 @@ hasNoPayload ctor = case ctor.payload of
 
 declareExternFn :: Ident -> ExternFunc -> SemAnalyzer ()
 declareExternFn ident externFunc@(ExternFunc loc _ _ _ _) = do
+   warnMisplacedPrime loc ident
    externId <- freshExternId
    declareSymbol ident (SymbolExternFn loc externId (externFuncSig externFunc)) SEExternFnRedeclaration
 

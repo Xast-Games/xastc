@@ -1,9 +1,10 @@
 {-# OPTIONS_GHC -Wno-unused-matches #-}
+{-# LANGUAGE LambdaCase #-}
 module Xast.SemAnalyzer.Imports where
 
 import Control.Monad.State
 import Control.Monad (forM_, unless, when)
-import Data.Maybe (fromJust)
+import Data.Maybe (fromJust, fromMaybe)
 import Data.List (sortBy)
 import qualified Data.Set as S
 import qualified Data.Map as M
@@ -14,7 +15,7 @@ import Xast.SemAnalyzer.Monad
 import Xast.SemAnalyzer.Types
 import Xast.Utils.Generic ((|>))
 import qualified Xast.Utils.List as L
-import Xast.SemAnalyzer.Query (exportOrigin, importBringsIn)
+import Xast.SemAnalyzer.Query (exportOrigin, importBringsIn, isTypeSymbol)
 import Data.Graph (stronglyConnComp, flattenSCCs)
 import Data.Maybe (mapMaybe, listToMaybe)
 
@@ -184,36 +185,165 @@ getModuleExports moduleName = gets $ \symTable ->
       |> fromJust
       |> (.exports)
 
-setModuleExports :: Module -> M.Map Ident Module -> SemAnalyzer ()
-setModuleExports moduleName exports =
+setModuleExports :: Module -> ResolvedExport -> SemAnalyzer ()
+setModuleExports moduleName resolved =
    modify $ \symTable ->
       let moduleInfo = M.findWithDefault emptyModuleInfo moduleName symTable.modules
-      in symTable
-         { modules = M.insert moduleName (moduleInfo { exports = exports }) symTable.modules
-         }
+          withExports = moduleInfo
+            { exports        = resolved.names
+            , abstractTypes  = resolved.abstract
+            , exportedFields = resolved.fields
+            }
+      in symTable { modules = M.insert moduleName withExports symTable.modules }
+
+-- | What one export list, or one entry of it, makes visible.
+data ResolvedExport = ResolvedExport
+   { names    :: M.Map Ident Module                -- ^ exported name → declaring module
+   , abstract :: S.Set TypeName                    -- ^ types exported without their same-named constructor
+   , fields   :: M.Map TypeName (S.Set FieldName)  -- ^ fields of own types visible to other modules
+   }
+
+instance Semigroup ResolvedExport where
+   (<>) :: ResolvedExport -> ResolvedExport -> ResolvedExport
+   first <> second = ResolvedExport
+      { names    = M.union first.names second.names
+      , abstract = S.union first.abstract second.abstract
+      , fields   = M.unionWith S.union first.fields second.fields
+      }
+
+instance Monoid ResolvedExport where
+   mempty :: ResolvedExport
+   mempty = ResolvedExport { names = M.empty, abstract = S.empty, fields = M.empty }
+
+-- | What an exporting module needs to resolve its export list.
+data ExportContext = ExportContext
+   { knownModules :: M.Map Module ModuleInfo
+   , moduleName :: Module                  -- ^ the exporting module
+   , ownSymbols :: M.Map Ident SymbolInfo
+   , imports    :: [Located ImportDef]
+   , location   :: Location                -- ^ of the export list
+   }
 
 -- | Sets a module's exports. @exports { .. }@ may list own or imported names;
---   @exports *@ exports only own names.
+--   @exports *@ exports only own names, with every constructor and field.
 resolveInvalidExports :: Program Parsed -> SemAnalyzer ()
-resolveInvalidExports (Program (ModuleDef _ moduleName (Located loc exportList)) imports _ _) =
+resolveInvalidExports (Program (ModuleDef _ moduleName (Located loc exportList)) imports _ _) = do
+   ownSymbols <- getModuleSymbols moduleName
+   modules <- gets (.modules)
    case exportList of
-      ExpSelect identifiers -> do
-         moduleData <- getModuleSymbols moduleName
-         modules <- gets (.modules)
-
-         let origins = L.forEach identifiers $ \identifier ->
-               (identifier, exportedFrom modules moduleName moduleData imports identifier)
-         let invalid = [ identifier | (identifier, Nothing) <- origins ]
-         let valid = M.fromList [ (identifier, origin) | (identifier, Just origin) <- origins ]
-
-         setModuleExports moduleName valid
+      ExpSelect items -> do
+         let context = ExportContext
+               { knownModules = modules
+               , moduleName = moduleName
+               , ownSymbols = ownSymbols
+               , imports    = imports
+               , location   = loc
+               }
+         resolved <- mapM (resolveExportItem context) items
+         let invalid = [ name | Left name <- resolved ]
+         setModuleExports moduleName (mconcat [ export | Right export <- resolved ])
          unless (null invalid) $
             errSem (SEInvalidExport moduleName loc invalid)
 
-      ExpFull -> do
-         symbols <- M.keys <$> getModuleSymbols moduleName
-         let ownExports = symbols |> map (\symbol -> (symbol, moduleName))
-         setModuleExports moduleName (M.fromList ownExports)
+      ExpFull -> setModuleExports moduleName ResolvedExport
+         { names    = M.map (const moduleName) ownSymbols
+         , abstract = S.empty
+         , fields   = M.map S.fromList (typeFields ownSymbols)
+         }
+
+-- | One export entry, or its name if the module has nothing by that name.
+resolveExportItem :: ExportContext -> ExportItem -> SemAnalyzer (Either Ident ResolvedExport)
+resolveExportItem context item =
+   case exportedFrom context.knownModules context.moduleName context.ownSymbols context.imports item.name of
+      Nothing -> pure (Left item.name)
+      Just origin -> do
+         let originSymbols = maybe M.empty (.symbols) (M.lookup origin context.knownModules)
+         Right <$> case (M.lookup item.name originSymbols, item.members) of
+            (Just (SymbolCtor _ _ ctorSignature), _) -> do
+               errSem (SEExportedCtorAlone context.location item.name ctorSignature.owner.name)
+               pure mempty
+            (Just symbol, NoMembers) ->
+               pure (exportTypeWith context origin symbol item.name [] [])
+            (Just symbol, AllMembers) -> do
+               let (ctors, fieldNames) = typeMembers originSymbols symbol
+               pure (exportTypeWith context origin symbol item.name ctors fieldNames)
+            (Just symbol, SomeMembers listed) -> do
+               let (ctors, fieldNames) = typeMembers originSymbols symbol
+               let unknown = filter (\member -> member `notElem` ctors && member `notElem` fieldNames) listed
+               unless (null unknown) $
+                  errSem (SEInvalidExportMembers context.location item.name unknown)
+               let listedCtors = filter (`elem` ctors) listed
+               let listedFields = filter (`elem` fieldNames) listed
+               pure (exportTypeWith context origin symbol item.name listedCtors listedFields)
+            (Nothing, _) -> pure mempty
+
+-- | A type (or a function) with the constructors and fields chosen for export.
+--   Constructors of an imported type are exported only if the imports bring them in.
+exportTypeWith
+   :: ExportContext
+   -> Module       -- ^ where the name is declared
+   -> SymbolInfo
+   -> Ident        -- ^ the exported name
+   -> [CtorName]   -- ^ chosen constructors
+   -> [FieldName]  -- ^ chosen fields
+   -> ResolvedExport
+exportTypeWith context origin symbol name ctors fieldNames =
+   let visibleCtors = ctors
+         |> filter (ctorVisibleHere context origin name)
+       ctorEntries = M.fromList [ (ctor, origin) | ctor <- visibleCtors ]
+       sharesNameWithCtor = case symbol of
+         SymbolTypeCtor {} -> True
+         _                 -> False
+       isAbstract = sharesNameWithCtor && name `notElem` visibleCtors
+       ownFields
+         | origin == context.moduleName && not (null fieldNames) = M.singleton name (S.fromList fieldNames)
+         | otherwise = M.empty
+   in ResolvedExport
+      { names    = M.insert name origin ctorEntries
+      , abstract = if isAbstract then S.singleton name else S.empty
+      , fields   = ownFields
+      }
+
+-- | Whether this module can see a constructor, so that it may export it.
+ctorVisibleHere :: ExportContext -> Module -> TypeName -> CtorName -> Bool
+ctorVisibleHere context origin typeName ctor
+   | origin == context.moduleName = True
+   | ctor == typeName =
+      -- the constructor that shares its type's name comes with the type, unless abstract
+      context.imports
+         |> map (.node)
+         |> filter (\importDef -> importBringsIn context.knownModules importDef typeName)
+         |> any (\importDef -> not (abstractIn context.knownModules importDef.importModule typeName))
+   | otherwise =
+      exportedFrom context.knownModules context.moduleName context.ownSymbols context.imports ctor == Just origin
+
+abstractIn :: M.Map Module ModuleInfo -> Module -> TypeName -> Bool
+abstractIn modules module' typeName = case M.lookup module' modules of
+   Just moduleInfo -> typeName `S.member` moduleInfo.abstractTypes
+   Nothing         -> False
+
+-- | The constructors and record fields of a type; nothing for other symbols.
+typeMembers :: M.Map Ident SymbolInfo -> SymbolInfo -> ([CtorName], [FieldName])
+typeMembers symbols = \case
+   SymbolType _ typeSignature -> membersOf symbols (S.toList typeSignature.ctors)
+   SymbolTypeCtor _ typeSignature _ _ -> membersOf symbols (S.toList typeSignature.ctors)
+   _ -> ([], [])
+
+membersOf :: M.Map Ident SymbolInfo -> [CtorName] -> ([CtorName], [FieldName])
+membersOf symbols ctors =
+   let fieldNames = L.forFlat ctors $ \ctor -> case M.lookup ctor symbols of
+         Just (SymbolCtor _ _ ctorSignature)       -> fromMaybe [] ctorSignature.fieldNames
+         Just (SymbolTypeCtor _ _ _ ctorSignature) -> fromMaybe [] ctorSignature.fieldNames
+         _                                         -> []
+   in (ctors, fieldNames)
+
+-- | The record fields of every type a module declares.
+typeFields :: M.Map Ident SymbolInfo -> M.Map TypeName [FieldName]
+typeFields symbols = M.fromList
+   [ (name, snd (typeMembers symbols symbol))
+   | (name, symbol) <- M.toList symbols
+   , isTypeSymbol symbol
+   ]
 
 -- | Where an exported name is declared: here, or where it is re-exported from.
 exportedFrom

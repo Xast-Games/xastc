@@ -68,13 +68,20 @@ data QualifiedName = QualifiedName
    deriving (Eq, Show, Ord)
 
 data ModuleInfo = ModuleInfo
-   { symbols :: M.Map Ident SymbolInfo
-   , exports :: M.Map Ident Module  -- ^ exported name → declaring module
+   { symbols        :: M.Map Ident SymbolInfo
+   , exports        :: M.Map Ident Module  -- ^ exported name → declaring module
+   , abstractTypes  :: S.Set TypeName      -- ^ exported without their same-named constructor, e.g. @Vec@
+   , exportedFields :: M.Map TypeName (S.Set FieldName)  -- ^ fields of own types that other modules may use
    }
    deriving (Eq, Show)
 
 emptyModuleInfo :: ModuleInfo
-emptyModuleInfo = ModuleInfo M.empty M.empty
+emptyModuleInfo = ModuleInfo
+   { symbols        = M.empty
+   , exports        = M.empty
+   , abstractTypes  = S.empty
+   , exportedFields = M.empty
+   }
 
 data SymbolInfo
    = SymbolType

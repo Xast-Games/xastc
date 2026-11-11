@@ -128,6 +128,18 @@ All of them are concatenative, so `<>` works on them (`uniqueness.md`, P18). Wit
 2. `Vec`: a buffer of initialized elements, with `@Drop` and `@Copyable(fn)` written by hand.
 3. `String`, the nodes of `RRB`, the chunks of `ChunkedVec`: built from `Vec`, so they get its destructor and its copy without writing their own.
 
+**Hiding.** `Std.Vec` exports `Vec` without its constructor and fields: `exports { Vec, push, get, len }`. Other modules can name the type and call its functions, but cannot build it, match on it, or read `data`, `len` and `cap`. Export lists follow Haskell: `Option(..)` exports every constructor and field, `Player(Player, name)` only those, and a bare `Vec` none of them. A field is visible outside its module only if that module exports it. [implemented]
+
+**Helpers.** Two Std intrinsics give what the collections need about their element type. The `Vec a` argument is only a witness for `a`, so they work on an empty vector too, and `@CompileTime` makes their result a constant per instance:
+
+```haskell
+@Intrinsic @CompileTime @Inline
+extern fn elemSize (Vec a) -> USize;    -- the size of one element
+
+@Intrinsic @CompileTime @Inline
+extern fn isPod (Vec a) -> Bool;        -- whether elements are copied bit by bit
+```
+
 **`Vec` layout.** Three words, `{ data, len, cap }`, with the elements on the heap, as in Rust. Only the first `len` slots are initialized. When it is full, the capacity doubles (0 → 4 → 8 → 16 → …), so pushing n elements costs O(n) in total. `grow` takes the vector with `*`, so `realloc` may extend the buffer in place: nobody else can hold a pointer to it.
 
 ```haskell
@@ -173,8 +185,6 @@ fn appendString left right = left { bytes = append left.bytes right.bytes };
 1. **The opt-in shared type** (section 6), together with persistent data structures and cheap snapshots of `RRB` and `ChunkedVec`.
 2. **Arena or region allocation**, and stack allocation of values that never escape.
 3. **Cycles through `RawPtr`**: it is unsafe, outside this model, and the one way to create them.
-4. **Std-only helpers** the collections need: `elemSize` (the size of an element type) and `isPod` (whether it is bit-copyable, known per instance).
-5. **Hiding fields**: the fields of `Vec` must not be reachable from user code, which needs private fields or a way to export a type without them.
 
 ## 11. Plan
 

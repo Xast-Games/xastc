@@ -169,6 +169,27 @@ instance PrintError ImportError where
 
       in printReportAt filename report
 
+   printError (SEExportedCtorAlone loc ctor typeName) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ("Constructor " <> show (blue (show ctor)) <> " is exported without its type")
+            [(toPosition pos len filename, This "Constructors are exported through their type")]
+            [Hint ("Write " <> show (green (show typeName <> "(" <> show ctor <> ")")) <> ", or " <> show (green (show typeName <> "(..)")) <> " for every constructor.")]
+
+      in printReportAt filename report
+
+   printError (SEInvalidExportMembers loc typeName members) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ("Type " <> show (blue (show typeName)) <> " has no constructors or fields named: "
+               <> show (green (intercalate ", " (map show members))))
+            [(toPosition pos len filename, This "This export is invalid")]
+            []
+
+      in printReportAt filename report
+
    printError (SEAmbiguousAlias alias locA locB) =
       let Location posA _ lenA = locA
           Location posB _ lenB = locB
@@ -562,6 +583,17 @@ instance PrintError TypeCheckError where
 
       in printReportAt filename report
 
+   printError (SEHiddenField loc typeName fld) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          moduleText = maybe "its module" show typeName.moduleName
+          report = errReport
+            ("Field " <> show (blue (show fld)) <> " of " <> show (blue (show typeName.name)) <> " is not exported by " <> moduleText)
+            [ (toPosition pos len filename, This "Hidden field") ]
+            [ Hint ("Use the functions of " <> moduleText <> ", or export the field there: " <> show typeName.name <> "(" <> show fld <> ")") ]
+
+      in printReportAt filename report
+
    printError (SENotARecordType loc ty) =
       let Location pos _ len = loc
           filename = sourceName pos
@@ -679,6 +711,15 @@ printWarning (SWFunctionGayness (Location pos _ len) ident args ) =
          [ (toPosition pos len filename, Where $ "This function has " <> show args <> " parameters")
          ]
          [ Hint "Consider reducing its gayness"]
+
+   in printReportAt filename report
+
+printWarning (SWMisplacedPrime (Location pos _ len) ident) =
+   let filename = sourceName pos
+       report = warnReport
+         ("Function `" <> show ident <> "` has `'` inside its name")
+         [ (toPosition pos len filename, This "`'` is not the last character here") ]
+         [ Hint "A single `'` at the end marks the unique variant of a function, e.g. `map'` for `map`." ]
 
    in printReportAt filename report
 

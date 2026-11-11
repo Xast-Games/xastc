@@ -58,6 +58,14 @@ identTests = TestList
 
    , TestCase $
       assertFails fnIdent "match"
+
+   , TestCase $
+      assertParses fnIdent "map'"
+      (Ident "map'")
+
+   , TestCase $
+      assertParses varIdent "x'"
+      (Ident "x'")
    ]
 
 typeTests :: Test
@@ -1206,9 +1214,23 @@ headerTests = TestLabel "Headers" $ TestList
                   , Ident "Player"
                   ])
                (loc $ ExpSelect
-                     [ Ident "Player"
-                     , Ident "spawn"
+                     [ ExportItem (Ident "Player") NoMembers
+                     , ExportItem (Ident "spawn") NoMembers
                      ]))
+
+   , TestCase $
+      assertParsesIgnoringLocations withTestLocationModuleDef moduleDef
+         "module Game exports { Option(..), Player(Player, name), Vec }"
+         (ModuleDef
+               testLocation
+               (Module [ Ident "Game" ])
+               (loc $ ExpSelect
+                     [ ExportItem (Ident "Option") AllMembers
+                     , ExportItem (Ident "Player") (SomeMembers [Ident "Player", Ident "name"])
+                     , ExportItem (Ident "Vec") NoMembers
+                     ]))
+
+   , TestCase $ assertFails moduleDef "module Foo exports { inc(..) }"
 
    -- Imports
    , TestCase $
@@ -1480,7 +1502,7 @@ programTests = TestLabel "Programs" $ TestList
             (ModuleDef
                   testLocation
                   (Module [Ident "Prelude"])
-                  (loc (ExpSelect [Ident "inc"])))
+                  (loc (ExpSelect [ExportItem (Ident "inc") NoMembers])))
             [loc $
                ImportDef
                   (Module [Ident "Math"])

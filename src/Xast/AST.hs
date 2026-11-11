@@ -427,7 +427,20 @@ data ModuleDef = ModuleDef
 
 data ExportPayload
    = ExpFull
-   | ExpSelect [Ident]
+   | ExpSelect [ExportItem]
+   deriving (Eq, Show)
+
+-- | One entry of an export list, e.g. @Option(..)@ or @Player(name, hp)@.
+data ExportItem = ExportItem
+   { name    :: Ident
+   , members :: ExportMembers
+   }
+   deriving (Eq, Show)
+
+data ExportMembers
+   = NoMembers            -- ^ @Vec@: a function, or a type without its constructors and fields
+   | AllMembers           -- ^ @Option(..)@: every constructor and field
+   | SomeMembers [Ident]  -- ^ @Player(Player, name)@: these constructors and fields
    deriving (Eq, Show)
 
 data ImportDef = ImportDef

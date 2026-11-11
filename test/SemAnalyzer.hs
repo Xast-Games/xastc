@@ -11,7 +11,8 @@ import qualified Data.Text as T
 import qualified Data.Map as M
 import Test.HUnit
 import Xast.Error.Types
-import Xast.AST (PackageName, stdPackageName, Program (..), ModuleDef (..))
+import Xast.AST (PackageName, stdPackageName, Program (..), ModuleDef (..), Ident (..))
+import Xast.SemAnalyzer.Declare (hasMisplacedPrime)
 import Xast.Parser.Program (parseProgram)
 import Xast.SemAnalyzer.Pass (fullAnalysis)
 import Xast.SemAnalyzer.Types (AnalysisResult)
@@ -28,6 +29,7 @@ tests = TestList
    , TestLabel "Intrinsic constraints" constraintTests
    , TestLabel "Intrinsic declarations" intrinsicDeclarationTests
    , TestLabel "Match exhaustiveness" exhaustivenessTests
+   , TestLabel "Unique variants"      uniqueVariantTests
    , TestLabel "Systems"              systemTests
    ]
 
@@ -221,6 +223,43 @@ importTests = TestList
          ]
       ]
 
+   , named "abstract type used through its functions" $ assertAnalyzes
+      [ moduleWithPlayer "Int, Player, spawn"
+      , moduleSource ["module B exports *", "use A *", "fn f (Int) -> Player;", "fn f n = spawn n;"]
+      ]
+
+   , named "constructing an abstract type" $ assertRejected isUndefinedCon
+      [ moduleWithPlayer "Int, Player, spawn"
+      , moduleSource ["module B exports *", "use A *", "fn f (Int) -> Player;", "fn f n = Player { name = n, hp = n };"]
+      ]
+
+   , named "reading a field that is not exported" $ assertRejected isHiddenField
+      [ moduleWithPlayer "Int, Player(Player, name), spawn"
+      , moduleSource ["module B exports *", "use A *", "fn f (Player) -> Int;", "fn f p = p.hp;"]
+      ]
+
+   , named "reading an exported field" $ assertAnalyzes
+      [ moduleWithPlayer "Int, Player(Player, name), spawn"
+      , moduleSource ["module B exports *", "use A *", "fn f (Player) -> Int;", "fn f p = p.name;"]
+      ]
+
+   , named "exporting every constructor and field" $ assertAnalyzes
+      [ moduleWithPlayer "Int, Player(..), spawn"
+      , moduleSource ["module B exports *", "use A *", "fn f (Player) -> Player;", "fn f p = p { hp = p.name };"]
+      ]
+
+   , named "a re-exported abstract type stays abstract" $ assertRejected isUndefinedCon
+      [ moduleWithPlayer "Int, Player, spawn"
+      , moduleSource ["module P exports { Int, Player(..) }", "use A *"]
+      , moduleSource ["module C exports *", "use P *", "fn f (Int) -> Player;", "fn f n = Player { name = n, hp = n };"]
+      ]
+
+   , named "exporting a constructor without its type" $ assertRejected isExportedCtorAlone
+      [ moduleSource ["module A exports { Shape, Circle }", "type Shape = Circle | Square;"] ]
+
+   , named "exporting a constructor the type does not have" $ assertRejected isInvalidExportMembers
+      [ moduleSource ["module A exports { Shape(Triangle) }", "type Shape = Circle | Square;"] ]
+
    , named "the same name imported from two modules" $ assertRejected isAmbiguousImport
       [ moduleWithInc "A"
       , moduleWithInc "A2"
@@ -319,7 +358,7 @@ reexportTests = TestList
          , "type Shape = Circle | Square;"
          ]
       , moduleSource
-         [ "module P exports { Shape, Circle, Square }"
+         [ "module P exports { Shape(..) }"
          , "use A *"
          ]
       , moduleSource
@@ -557,6 +596,27 @@ exhaustivenessTests = TestList
       ]
    ]
 
+uniqueVariantTests :: Test
+uniqueVariantTests = TestList
+   [ named "a function and its unique variant" $ assertAnalyzes $ inModule
+      [ "fn inc (Int) -> Int;"
+      , "fn inc x = x;"
+      , "fn inc' (Int) -> Int;"
+      , "fn inc' x = inc x;"
+      , "fn twice (Int) -> Int;"
+      , "fn twice x = inc' (inc' x);"
+      ]
+
+   , named "`'` at the end is in place" $
+      assertBool "map' warned" (not (hasMisplacedPrime (Ident "map'")))
+
+   , named "`'` inside a name is misplaced" $
+      assertBool "map'wrong not warned" (hasMisplacedPrime (Ident "map'wrong"))
+
+   , named "two `'` are misplaced" $
+      assertBool "map'' not warned" (hasMisplacedPrime (Ident "map''"))
+   ]
+
 systemTests :: Test
 systemTests = TestList
    [ named "system with a definition and an implementation" $ assertAnalyzes $ inModule
@@ -789,6 +849,16 @@ moduleWithInc moduleName = moduleSource
    ]
 
 -- | A module that declares its own type `Box` and a function `openBox` on it.
+-- | A module that declares a record @Player@ and exports the given list.
+moduleWithPlayer :: Text -> Text
+moduleWithPlayer exportList = moduleSource
+   [ "module A exports { " <> exportList <> " }"
+   , "extern type Int;"
+   , "type Player = Player { name : Int, hp : Int };"
+   , "fn spawn (Int) -> Player;"
+   , "fn spawn n = Player { name = n, hp = n };"
+   ]
+
 moduleWithBox :: Text -> Text
 moduleWithBox moduleName = moduleSource
    [ "module " <> moduleName <> " exports *"
@@ -805,6 +875,11 @@ isCyclicImport = \case { SEImportError (SECyclicImportError {}) -> True; _ -> Fa
 isMissingModule = \case { SEImportError (SEMissingModule {}) -> True; _ -> False }
 isMissingImports = \case { SEImportError (SEMissingImports {}) -> True; _ -> False }
 isPrivateImports = \case { SEImportError (SEPrivateImports {}) -> True; _ -> False }
+
+isExportedCtorAlone, isInvalidExportMembers, isHiddenField :: SemError -> Bool
+isExportedCtorAlone = \case { SEImportError (SEExportedCtorAlone {}) -> True; _ -> False }
+isInvalidExportMembers = \case { SEImportError (SEInvalidExportMembers {}) -> True; _ -> False }
+isHiddenField = \case { SETypeCheckError (SEHiddenField {}) -> True; _ -> False }
 
 isInvalidExport, isAmbiguousAlias, isAmbiguousImport, isImportDeclConflict :: SemError -> Bool
 isInvalidExport = \case { SEImportError (SEInvalidExport {}) -> True; _ -> False }

@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.InferExpr where
 
-import Control.Monad (forM_, zipWithM, forM)
+import Control.Monad (forM_, zipWithM, forM, unless)
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as S
 import qualified Data.Map as M
@@ -150,7 +150,7 @@ inferType imports expression = case expression of
          Just alias -> lookupQualifiedConstructor imports alias ctorName
 
       (exprType, typedAssigns) <- case maybeSymbol of
-         Just symbol@(SymbolCtor _ _ (CtorSig _ _ maybeFieldNames _)) -> do
+         Just symbol@(SymbolCtor _ _ (CtorSig owner _ maybeFieldNames _)) -> do
             resultType <- ctorType location symbol
             let (fieldTypes, ctorResultTy) = case resultType of
                   TyFn args result -> (args, result)
@@ -159,7 +159,9 @@ inferType imports expression = case expression of
             typedFieldAssigns <- forM assigns $ \(RecAssign fieldName value) -> do
                typedValue <- inferType imports value
                case fieldTypeOf fieldName.node of
-                  Just expectedType -> compareTypes location expectedType (typeOf typedValue)
+                  Just expectedType -> do
+                     checkFieldVisible location owner fieldName.node
+                     compareTypes location expectedType (typeOf typedValue)
                   Nothing           -> errSem (SEUnknownField location ctorName fieldName.node)
                pure $ RecAssign fieldName typedValue
             pure (ctorResultTy, typedFieldAssigns)
@@ -181,10 +183,12 @@ inferType imports expression = case expression of
       typedAssigns <- forM assigns $ \(RecAssign fieldName value) -> do
          typedValue <- inferType imports value
          case fields of
-            Just (ctor, fieldNames, fieldTypes) ->
+            Just (recordName, fieldNames, fieldTypes) ->
                case lookup fieldName.node (zip fieldNames fieldTypes) of
-                  Just expectedType -> compareTypes location expectedType (typeOf typedValue)
-                  Nothing           -> errSem (SEUnknownField location ctor fieldName.node)
+                  Just expectedType -> do
+                     checkFieldVisible location recordName fieldName.node
+                     compareTypes location expectedType (typeOf typedValue)
+                  Nothing           -> errSem (SEUnknownField location recordName.name fieldName.node)
             Nothing -> pure ()
          pure $ RecAssign fieldName typedValue
 
@@ -197,10 +201,10 @@ inferType imports expression = case expression of
          GetField field -> do
             fields <- recordFieldsOf imports location baseType
             case fields of
-               Just (ctor, fieldNames, fieldTypes) ->
+               Just (recordName, fieldNames, fieldTypes) ->
                   case lookup field (zip fieldNames fieldTypes) of
-                     Just fieldType -> pure fieldType
-                     Nothing        -> errSem (SEUnknownField location ctor field) >> pure TyInvalid
+                     Just fieldType -> checkFieldVisible location recordName field >> pure fieldType
+                     Nothing        -> errSem (SEUnknownField location recordName.name field) >> pure TyInvalid
                Nothing -> pure TyInvalid  -- recordFieldsOf already reported why
 
          GetTupleField index -> case baseType of
@@ -209,7 +213,15 @@ inferType imports expression = case expression of
 
       pure $ ExpVarGetter (TypedInfo location exprType maybeResolution) typedBaseExpression getter
 
-recordFieldsOf :: [Located ImportDef] -> Location -> Type -> SemAnalyzer (Maybe (Ident, [Ident], [Type]))
+-- | Reports a field of another module's type that its module does not export.
+checkFieldVisible :: Location -> QualifiedIdent -> FieldName -> SemAnalyzer ()
+checkFieldVisible location recordName fieldName = do
+   visible <- fieldVisible recordName fieldName
+   unless visible $
+      errSem (SEHiddenField location recordName fieldName)
+
+-- | The record type, its field names and their types here.
+recordFieldsOf :: [Located ImportDef] -> Location -> Type -> SemAnalyzer (Maybe (QualifiedIdent, [FieldName], [Type]))
 recordFieldsOf imports location recordType = case typeHead recordType of
    Nothing -> do
       errSem (SENotARecordType location recordType)
@@ -231,7 +243,7 @@ recordFieldsOf imports location recordType = case typeHead recordType of
                         result           -> ([], result)
                   unify location ctorResultTy recordType
                   resolvedFieldTypes <- mapM resolve fieldTypes
-                  pure $ Just (ctorName, fieldNames, resolvedFieldTypes)
+                  pure $ Just (qualified, fieldNames, resolvedFieldTypes)
          _ -> do
             errSem (SENotARecordType location recordType)
             pure Nothing
