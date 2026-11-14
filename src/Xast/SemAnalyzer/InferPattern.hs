@@ -61,7 +61,7 @@ inferPattern imports ty pattern = case pattern of
             let maybeResolution' = Just (ResConstructor ctorId)
             resultTy <- ctorType location symbol
             let (expectedFieldTys, ctorResultTy) = case resultTy of
-                  TyFn args result -> (args, result)
+                  TyFn params results -> (map (.ty) params, joinResults results)
                   result           -> ([], result)
 
             unify location ty ctorResultTy

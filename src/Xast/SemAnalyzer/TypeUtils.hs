@@ -22,8 +22,9 @@ ctorType _ (SymbolCtor _ _ (CtorSig ownerIdent generics _ fieldTys)) = do
    fresh <- mapM (const freshTyVar) generics
    let subst    = M.fromList (zip generics fresh)
        fieldTypes = map (substGnr subst) fieldTys
-       resultType = foldl' TyApp (TyCon ownerIdent) fresh
-   pure $ if null fieldTypes then resultType else TyFn fieldTypes resultType
+       builtType = foldl' TyApp (TyCon ownerIdent) fresh
+   -- unmarked: storing an argument in a constructor is a move or a clone at the call
+   pure $ if null fieldTypes then builtType else functionType (map readOnly fieldTypes) [readOnly builtType]
 ctorType location invalid =
    unreachableWith $ "Invalid constructor symbol at " ++ show location ++ ": " ++ show invalid
 
@@ -31,11 +32,11 @@ applyTypes :: Location -> Type -> Type -> SemAnalyzer Type
 applyTypes location applicantTy operandTy = do
    applicantTy' <- resolve applicantTy
    case applicantTy' of
-      TyFn (argTy:restArgs) retTy -> do
-         unify location argTy operandTy
-         if null restArgs
-            then resolve retTy
-            else resolve (TyFn restArgs retTy)
+      TyFn (param : restParams) results -> do
+         unify location param.ty operandTy
+         if null restParams
+            then resolve (joinResults results)
+            else resolve (TyFn restParams results)
 
       TyFn [] _ -> do
          errSem (SETooManyArgs location applicantTy')
@@ -43,7 +44,7 @@ applyTypes location applicantTy operandTy = do
 
       TyVar varId -> do
          returnTypeVar <- freshTyVar
-         bindOrFail location varId (TyFn [operandTy] returnTypeVar)
+         bindOrFail location varId (functionType [readOnly operandTy] [readOnly returnTypeVar])
          pure returnTypeVar
 
       _ -> do

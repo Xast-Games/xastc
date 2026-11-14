@@ -118,7 +118,7 @@ containsInvalid = \case
    TyInvalid        -> True
    TyApp func arg   -> containsInvalid func || containsInvalid arg
    TyTuple elements -> any containsInvalid elements
-   TyFn args result -> any containsInvalid args || containsInvalid result
+   TyFn params results -> any containsInvalid (functionTypes params results)
    _                -> False
 
 toSpace :: Pattern Typed -> Space

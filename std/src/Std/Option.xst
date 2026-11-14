@@ -3,6 +3,7 @@ module Std.Option exports *
 use Std.Bool *
 use Std.Error { error }
 
+@Copyable 
 type Option a = Some a | None;
 
 fn isSome (Option a) -> Bool;

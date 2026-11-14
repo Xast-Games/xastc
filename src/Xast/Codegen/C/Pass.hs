@@ -21,7 +21,7 @@ import Xast.Codegen.C.Monad (CCodegen, runCodegen, CCodegenEnv (..))
 import qualified Xast.Utils.List as L
 import qualified Data.Map as M
 import Data.Graph (stronglyConnComp, flattenSCCs)
-import Xast.Codegen.C.Intrinsics (IntrinsicDefinition (..), IntrinsicSite (..), intrinsicDefinitions)
+import Xast.Codegen.C.Intrinsics (IntrinsicBody, IntrinsicSite (..), intrinsicBodies)
 
 codegen 
    :: [Kira] 
@@ -300,7 +300,7 @@ codegenInstruct = \case
       codegenMatch matchType scrutineeExpr arms fallback dest exhaustive
 
 -- | A static inline C function for one intrinsic instance.
---   The body comes from 'intrinsicDefinitions'.
+--   The body comes from 'intrinsicBodies'.
 codegenIntrinsic :: KirIntrinsicDef -> CFunction
 codegenIntrinsic instance' =
    let paramNames = map intrinsicParamName [0 .. length instance'.params - 1]
@@ -310,13 +310,13 @@ codegenIntrinsic instance' =
          , operandType = intrinsicOperandType instance'
          , resultType  = instance'.retTy
          }
-       definition = lookupIntrinsicDefinition instance'.intrinsic
+       body = lookupIntrinsicBody instance'.intrinsic
    in CFunction
       { linkage = CStaticInline
       , ty      = typeToCType instance'.retTy
       , name    = instance'.name.text
       , args    = args
-      , body    = definition.body site
+      , body    = body site
       }
 
 intrinsicParam :: Type -> Text -> CFuncArg
@@ -329,8 +329,8 @@ intrinsicOperandType instance' = case instance'.params of
    first : _ -> first
    []        -> instance'.retTy
 
-lookupIntrinsicDefinition :: FunctionName -> IntrinsicDefinition
-lookupIntrinsicDefinition name = case M.lookup name intrinsicDefinitions of
+lookupIntrinsicBody :: FunctionName -> IntrinsicBody
+lookupIntrinsicBody name = case M.lookup name intrinsicBodies of
    Just known -> known
    Nothing    -> unreachableWith ("the semantic analyzer let through unknown intrinsic " ++ show name)
 

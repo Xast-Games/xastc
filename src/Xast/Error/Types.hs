@@ -145,6 +145,51 @@ data ModifierError
       , expectedArity :: Int  -- ^ from the compiler's definition
       , actualArity   :: Int  -- ^ from the declaration
       }
+   | SEPodWithDrop
+      { location :: Location
+      , typeName :: TypeName
+      }
+   | SECopyableWithDrop
+      { location :: Location
+      , typeName :: TypeName  -- ^ has @Drop, so it must name its copy function
+      }
+   | SECopyableExtern
+      { location :: Location
+      , typeName :: TypeName  -- ^ an extern type, whose fields are unknown
+      }
+   | SEInvalidPod
+      { location :: Location
+      , typeName :: TypeName
+      , problem  :: PodProblem
+      }
+   | SENotCopyableField
+      { location  :: Location
+      , typeName  :: TypeName
+      , fieldType :: Type
+      }
+   | SEUnknownOwnershipFunction
+      { location     :: Location
+      , typeName     :: TypeName
+      , functionName :: FunctionName  -- ^ named by @Copyable(fn) or @Drop(fn)
+      }
+   | SECopyFunctionSignature
+      { location     :: Location
+      , functionName :: FunctionName
+      , copiedType   :: Type          -- ^ the function must be @fn(T) -> T@ for this type
+      }
+   | SEDropFunctionSignature
+      { location     :: Location
+      , functionName :: FunctionName
+      , droppedType  :: Type          -- ^ the function must be @fn(*T) -> ()@ for this type
+      }
+   deriving Show
+
+-- | Why a type cannot be @Pod.
+data PodProblem
+   = PodGeneric                 -- ^ it has type parameters
+   | PodSumWithFields           -- ^ several constructors, some with fields
+   | PodNotPodField Type        -- ^ a field that is not @Pod
+   | PodZeroSizedField Type     -- ^ a field that has no data
    deriving Show
 
 instance ToSemError ModifierError where
@@ -198,6 +243,10 @@ data DefinitionError
    = SEIntrinsicTypeOutsideStd
       { location :: Location     -- ^ the type that uses it
       , kind     :: TyIntrinsic
+      }
+   | SEHandedBackWithoutTake
+      { location   :: Location
+      , resultType :: Type      -- ^ a @*@ result with no @*@ parameter of its type
       }
    | SEMissingFnDef
       { location :: Location  -- ^ the implementation without a declaration

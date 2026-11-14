@@ -9,11 +9,8 @@ import Xast.AST
 import Xast.Codegen.C.Types
 import Xast.Utils.Generic (todo__, unreachableWith)
 
--- | What the compiler knows of one intrinsic.
-data IntrinsicDefinition = IntrinsicDefinition
-   { arity :: Int                        -- ^ required parameter count
-   , body  :: IntrinsicSite -> [CStmt]  -- ^ C function body for one instance
-   }
+-- | The C function body of one intrinsic instance.
+type IntrinsicBody = IntrinsicSite -> [CStmt]
 
 -- | What a body is built from, e.g. for @opAdd@ on @Int@.
 data IntrinsicSite = IntrinsicSite
@@ -22,9 +19,9 @@ data IntrinsicSite = IntrinsicSite
    , resultType  :: Type     -- ^ e.g. @Bool@ for @opEq@
    }
 
--- | All intrinsics. Every @Intrinsic declaration must match one, including arity.
-intrinsicDefinitions :: M.Map FunctionName IntrinsicDefinition
-intrinsicDefinitions = M.fromList
+-- | The C body of every intrinsic in 'Xast.Intrinsics.intrinsicArities'.
+intrinsicBodies :: M.Map FunctionName IntrinsicBody
+intrinsicBodies = M.fromList
    [ (Ident "opAdd",        binary (arithmetic Add))
    , (Ident "opSub",        binary (arithmetic Sub))
    , (Ident "opMul",        binary (arithmetic Mul))
@@ -48,26 +45,14 @@ intrinsicDefinitions = M.fromList
    ]
 
 -- | Two parameters; the body returns one expression.
-binary :: (IntrinsicSite -> CExpr -> CExpr -> CExpr) -> IntrinsicDefinition
-binary operation = IntrinsicDefinition
-   { arity = 2
-   , body  = binaryBody operation
-   }
-
-binaryBody :: (IntrinsicSite -> CExpr -> CExpr -> CExpr) -> IntrinsicSite -> [CStmt]
-binaryBody operation site = case site.params of
+binary :: (IntrinsicSite -> CExpr -> CExpr -> CExpr) -> IntrinsicBody
+binary operation site = case site.params of
    [left, right] -> returning (operation site left right)
    _             -> unreachableWith "a binary intrinsic instance without two parameters"
 
 -- | One parameter; the body returns one expression.
-unary :: (IntrinsicSite -> CExpr -> CExpr) -> IntrinsicDefinition
-unary operation = IntrinsicDefinition
-   { arity = 1
-   , body  = unaryBody operation
-   }
-
-unaryBody :: (IntrinsicSite -> CExpr -> CExpr) -> IntrinsicSite -> [CStmt]
-unaryBody operation site = case site.params of
+unary :: (IntrinsicSite -> CExpr -> CExpr) -> IntrinsicBody
+unary operation site = case site.params of
    [operand] -> returning (operation site operand)
    _         -> unreachableWith "a unary intrinsic instance without one parameter"
 

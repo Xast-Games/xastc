@@ -3,6 +3,7 @@ module Std.Alloc exports *
 use Std.Num { USize }
 
 --| Raw ptr type
+@Pod 
 extern type RawPtr;
 
 -- @Intrinsic

@@ -26,7 +26,9 @@ typeCheck (Program moduleDef@(ModuleDef _ moduleName _) imports statements sourc
 
 typeCheckStmt :: [Located ImportDef] -> Stmt Resolved -> SemAnalyzer (Stmt Typed)
 typeCheckStmt imports (StmtFunc (FnImpl (FuncImpl implLocation functionName patterns expression))) = do
-   (FuncSig argTypes retType) <- fromJust <$> lookupCurrentFunction functionName
+   signature <- fromJust <$> lookupCurrentFunction functionName
+   let argTypes = paramTypes signature
+   let retType = resultType signature
 
    -- 0) Check expressions integer bounds
    checkIntegerBounds expression

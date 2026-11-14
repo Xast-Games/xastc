@@ -2,9 +2,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Xast.Parser.Function where
 
-import Text.Megaparsec (between, sepBy, many)
+import Text.Megaparsec (many)
 
-import Xast.Parser.Type (type')
+import Xast.Parser.Type (markedParams, markedResults)
 import Xast.Parser.Ident (fnIdent)
 import Xast.Parser.Expr (expr, atomPattern')
 import Xast.Parser.Common
@@ -22,10 +22,10 @@ funcDef :: [Modifier] -> Parser FuncDef
 funcDef modifiers = withLoc $ do
    _           <- symbol "fn"
    name        <- fnIdent
-   args        <- between (symbol "(") (symbol ")") (located type' `sepBy` symbol ",")
-   _           <- symbol "->"
-   retType     <- located type'
-   _           <- endOfStmt
+   args     <- markedParams
+   _        <- symbol "->"
+   results  <- markedResults
+   _        <- endOfStmt
 
    return $ \location -> FuncDef {..}
 

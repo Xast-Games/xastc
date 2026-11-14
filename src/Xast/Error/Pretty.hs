@@ -271,6 +271,59 @@ instance PrintError ModifierError where
 
       in printReportAt filename report
 
+   printError (SEPodWithDrop loc typeName) =
+      modifierReport loc
+         ("Type " <> show (blue (show typeName)) <> " cannot be both @Pod and @Drop")
+         "A type that frees something owns it, so a bit copy would give it two owners"
+         (Just "Remove @Pod and name a copy function: @Copyable(fn)")
+
+   printError (SECopyableWithDrop loc typeName) =
+      modifierReport loc
+         ("Type " <> show (blue (show typeName)) <> " has @Drop, so @Copyable needs a copy function")
+         "Copying its fields would give two owners of what it frees"
+         (Just "Write @Copyable(fn), where fn : fn(T) -> T makes a real copy")
+
+   printError (SECopyableExtern loc typeName) =
+      modifierReport loc
+         ("Extern type " <> show (blue (show typeName)) <> " cannot be copied field by field")
+         "Its fields are not known"
+         (Just "Write @Copyable(fn) with a function that copies it, or @Pod if a bit copy is a copy")
+
+   printError (SEInvalidPod loc typeName problem) =
+      let reason = case problem of
+            PodGeneric             -> "It has type parameters"
+            PodSumWithFields       -> "It has several constructors, and some have fields"
+            PodNotPodField ty      -> "Field of type " <> typename ty <> " is not @Pod"
+            PodZeroSizedField ty   -> "Field of type " <> typename ty <> " has no data"
+      in modifierReport loc
+         ("Type " <> show (blue (show typeName)) <> " cannot be @Pod")
+         reason
+         (Just "@Pod is for a product of numbers and other @Pod types, or an enum of constructors without fields")
+
+   printError (SENotCopyableField loc typeName fieldType) =
+      modifierReport loc
+         ("Type " <> show (blue (show typeName)) <> " cannot be @Copyable")
+         ("Field of type " <> typename fieldType <> " is not copyable")
+         (Just "Mark the field's type @Copyable or @Pod, or name a copy function: @Copyable(fn)")
+
+   printError (SEUnknownOwnershipFunction loc typeName functionName) =
+      modifierReport loc
+         ("Function " <> show (blue (show functionName)) <> " named by " <> show (blue (show typeName)) <> " is not declared")
+         "Not found in this module"
+         Nothing
+
+   printError (SECopyFunctionSignature loc functionName copiedType) =
+      modifierReport loc
+         ("Copy function " <> show (blue (show functionName)) <> " has the wrong signature")
+         ("Expected fn(" <> typename copiedType <> ") -> " <> typename copiedType)
+         Nothing
+
+   printError (SEDropFunctionSignature loc functionName droppedType) =
+      modifierReport loc
+         ("Drop function " <> show (blue (show functionName)) <> " has the wrong signature")
+         ("Expected fn(*" <> typename droppedType <> ") -> ()")
+         (Just "A drop function takes the value it destroys")
+
    printError (SEUnknownIntrinsic loc name) =
       let Location pos _ len = loc
           filename = sourceName pos
@@ -360,6 +413,16 @@ instance PrintError DefinitionError where
             ("`" <> typename (TyInt kind) <> "` can only be used in Std")
             [ (toPosition pos len filename, This "Used here") ]
             [ Hint "Use a concrete type, e.g. `Int`, or a generic" ]
+
+      in printReportAt filename report
+
+   printError (SEHandedBackWithoutTake loc resultType) =
+      let Location pos _ len = loc
+          filename = sourceName pos
+          report = errReport
+            ("Result `*" <> typename resultType <> "` hands back nothing")
+            [ (toPosition pos len filename, This "There is no `*` parameter of this type") ]
+            [ Hint ("A `*` result returns a `*` parameter to the caller. Take one with `*" <> typename resultType <> "`, or return a new value: `" <> typename resultType <> "`") ]
 
       in printReportAt filename report
 
@@ -635,6 +698,17 @@ instance PrintError TypeCheckError where
             [ Hint "Add arms for the missing cases, add a wildcard/variable arm, or mark the type @NonExhaustive." ]
 
       in printReportAt filename report
+
+-- | A report for a type or function whose modifiers do not fit it.
+modifierReport :: Location -> String -> String -> Maybe String -> IO ()
+modifierReport loc message marker hint =
+   let Location pos _ len = loc
+       filename = sourceName pos
+       report = errReport
+         message
+         [ (toPosition pos len filename, This marker) ]
+         [ Hint text | Just text <- [hint] ]
+   in printReportAt filename report
 
 redeclarationError :: String -> Ident -> Location -> Location -> IO ()
 redeclarationError kind ident oldLoc newLoc =

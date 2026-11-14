@@ -182,7 +182,7 @@ typeContains needle haystack
    | otherwise = case haystack of
       TyApp func arg      -> typeContains needle func || typeContains needle arg
       TyTuple memberTypes -> any (typeContains needle) memberTypes
-      TyFn args retType   -> any (typeContains needle) args || typeContains needle retType
+      TyFn params results -> any (typeContains needle) (functionTypes params results)
       _                   -> False
 
 resolveEntityPattern :: M.Map Ident (LocalId, Location) -> Type -> Maybe QueriedEntity -> EntityPattern Parsed -> EntityPattern Resolved

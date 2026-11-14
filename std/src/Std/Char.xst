@@ -1,3 +1,4 @@
 module Std.Char exports *
 
+@Pod 
 extern type Char;

@@ -104,11 +104,25 @@ typeTests = TestList
    , TestCase $
       assertParses type' "fn(Int, Bool) -> String"
       ( TyFn
-         [ unresolvedType (Ident "Int")
-         , unresolvedType (Ident "Bool")
+         [ readOnly (unresolvedType (Ident "Int"))
+         , readOnly (unresolvedType (Ident "Bool"))
          ]
-         (unresolvedType (Ident "String"))
+         [readOnly (unresolvedType (Ident "String"))]
       )
+
+   , TestCase $
+      assertParses type' "fn(*a, b) -> *a"
+      ( TyFn [MarkedType Take (TyGnr (Ident "a")), readOnly (TyGnr (Ident "b"))] [MarkedType Take (TyGnr (Ident "a"))] )
+
+   , TestCase $
+      assertParses type' "fn(*Console) -> (Int, *Console)"
+      ( TyFn
+         [MarkedType Take (unresolvedType (Ident "Console"))]
+         [readOnly (unresolvedType (Ident "Int")), MarkedType Take (unresolvedType (Ident "Console"))]
+      )
+
+   , TestCase $
+      assertFails type' "Option *Int"
 
    , TestCase $
          assertFails type' "fn("
@@ -853,10 +867,10 @@ functionTests = TestLabel "Functions" $ TestList
                   testLocation
                   []
                   (Ident "add")
-                  [ (loc $ unresolvedType $ Ident "Int")
+                  (map readArg [ (loc $ unresolvedType $ Ident "Int")
                   , (loc $ unresolvedType $ Ident "Int")
-                  ]
-                  (loc $ unresolvedType $ Ident "Int"))
+                  ])
+                  [readArg (loc $ unresolvedType $ Ident "Int")])
 
    , TestCase $
       assertParsesIgnoringLocations withTestLocationFunc func
@@ -866,8 +880,21 @@ functionTests = TestLabel "Functions" $ TestList
                   testLocation
                   []
                   (Ident "id")
-                  [(loc $ TyGnr $ Ident "a")]
-                  (loc $ TyGnr $ Ident "a"))
+                  (map readArg [(loc $ TyGnr $ Ident "a")])
+                  [readArg (loc $ TyGnr $ Ident "a")])
+
+   , TestCase $
+      assertParsesIgnoringLocations withTestLocationFunc func
+         "fn push(Int, *Vec Int) -> *Vec Int;"
+         (FnDef $
+            FuncDef
+                  testLocation
+                  []
+                  (Ident "push")
+                  [ loc (readOnly (unresolvedType (Ident "Int")))
+                  , loc (MarkedType Take (TyApp (unresolvedType (Ident "Vec")) (unresolvedType (Ident "Int"))))
+                  ]
+                  [loc (MarkedType Take (TyApp (unresolvedType (Ident "Vec")) (unresolvedType (Ident "Int"))))])
 
    , TestCase $
       assertParsesIgnoringLocations withTestLocationFunc func
@@ -878,7 +905,7 @@ functionTests = TestLabel "Functions" $ TestList
                   []
                   (Ident "makePoint")
                   []
-                  (loc $ unresolvedType $ Ident "Point"))
+                  [readArg (loc $ unresolvedType $ Ident "Point")])
 
    -- Function implementations
    , TestCase $
@@ -1101,8 +1128,8 @@ externTests = TestLabel "Extern" $ TestList
                   testLocation
                   []
                   (Ident "puts")
-                  [(loc $ unresolvedType $ Ident "String")]
-                  (loc $ unresolvedType $ Ident "Int"))
+                  (map readArg [(loc $ unresolvedType $ Ident "String")])
+                  [readArg (loc $ unresolvedType $ Ident "Int")])
 
    , TestCase $
       assertParsesIgnoringLocations withTestLocationExtern extern
@@ -1112,8 +1139,8 @@ externTests = TestLabel "Extern" $ TestList
                   testLocation
                   []
                   (Ident "malloc")
-                  [(loc $ unresolvedType $ Ident "Int")]
-                  (loc $ unresolvedType $ Ident "Ptr"))
+                  (map readArg [(loc $ unresolvedType $ Ident "Int")])
+                  [readArg (loc $ unresolvedType $ Ident "Ptr")])
 
    , TestCase $
         assertParsesIgnoringLocations withTestLocationExtern extern
@@ -1124,7 +1151,7 @@ externTests = TestLabel "Extern" $ TestList
                     []
                     (Ident "panic")
                     []
-                  (loc $ unresolvedType $ Ident "Never"))
+                    [readArg (loc $ unresolvedType $ Ident "Never")])
 
    , TestCase $
       assertParsesIgnoringLocations withTestLocationExtern extern
@@ -1134,8 +1161,8 @@ externTests = TestLabel "Extern" $ TestList
                   testLocation
                   [ModIntrinsic, ModInline, ModCompileTime]
                   (Ident "opAdd")
-                  [loc (TyInt TyNumber), loc (TyInt TyNumber)]
-                  (loc (TyInt TyNumber)))
+                  (map readArg [loc (TyInt TyNumber), loc (TyInt TyNumber)])
+                  [readArg (loc (TyInt TyNumber))])
 
    , TestCase $
       assertFails extern "@Parallel extern fn f() -> Int;"
@@ -1150,6 +1177,7 @@ externTests = TestLabel "Extern" $ TestList
          (ExtType $
             ExternType
                   testLocation
+                  []
                   (Ident "CString")
                   [])
 
@@ -1159,6 +1187,7 @@ externTests = TestLabel "Extern" $ TestList
          (ExtType $
             ExternType
                   testLocation
+                  []
                   (Ident "Ptr")
                   [Ident "a"])
 
@@ -1168,8 +1197,31 @@ externTests = TestLabel "Extern" $ TestList
          (ExtType $
             ExternType
                   testLocation
+                  []
                   (Ident "Either")
                   [Ident "a", Ident "b"])
+
+   , TestCase $
+      assertParsesIgnoringLocations withTestLocationExtern extern
+         "@Pod extern type Int;"
+         (ExtType $
+            ExternType
+                  testLocation
+                  [ModPod]
+                  (Ident "Int")
+                  [])
+
+   , TestCase $
+      assertParsesIgnoringLocations withTestLocationExtern extern
+         "@Drop(freeVector) @Copyable(cloneVector) extern type FFIVector;"
+         (ExtType $
+            ExternType
+                  testLocation
+                  [ModDrop (Ident "freeVector"), ModCopyable (Just (Ident "cloneVector"))]
+                  (Ident "FFIVector")
+                  [])
+
+   , TestCase $ assertFails extern "@Intrinsic extern type Int;"
 
    -- Failures
    , TestCase $ assertFails extern "extern"
@@ -1437,7 +1489,7 @@ programTests = TestLabel "Programs" $ TestList
                            []
                            (Ident "main")
                            []
-                           (loc $ unresolvedType $ Ident "Int")
+                           [readArg (loc $ unresolvedType $ Ident "Int")]
             ]
             src)
 
@@ -1457,6 +1509,7 @@ programTests = TestLabel "Programs" $ TestList
                   ExtType $
                      ExternType
                            testLocation
+                           []
                            (Ident "CString")
                            []
             ]
@@ -1590,10 +1643,18 @@ assertParsesIgnoringLocations setLocations p = assertParses (setLocations <$> p)
 -- values do not need to know exact source positions.
 withTestLocationFunc :: Func Parsed -> Func Parsed
 withTestLocationFunc = \case
-   FnDef (FuncDef _ modifiers name args retType) ->
-      FnDef (FuncDef testLocation modifiers name args retType)
+   FnDef (FuncDef _ modifiers name args results) ->
+      FnDef (FuncDef testLocation modifiers name (map withTestLocationNode args) (map withTestLocationNode results))
    FnImpl (FuncImpl _ name args body) ->
       FnImpl (FuncImpl testLocation name args body)
+
+-- | A located node at `testLocation`.
+withTestLocationNode :: Located a -> Located a
+withTestLocationNode located' = Located testLocation located'.node
+
+-- | An unmarked parameter or result, as written without `*`.
+readArg :: Located Type -> Located MarkedType
+readArg = fmap readOnly
 
 withTestLocationTypeDef :: TypeDef -> TypeDef
 withTestLocationTypeDef (TypeDef _ modifiers name generics ctors) =
@@ -1604,10 +1665,10 @@ withTestLocationCtor (Ctor _ name payload) = Ctor testLocation name payload
 
 withTestLocationExtern :: Extern -> Extern
 withTestLocationExtern = \case
-   ExtFunc (ExternFunc _ modifiers name args retType) ->
-      ExtFunc (ExternFunc testLocation modifiers name args retType)
-   ExtType (ExternType _ name generics) ->
-      ExtType (ExternType testLocation name generics)
+   ExtFunc (ExternFunc _ modifiers name args results) ->
+      ExtFunc (ExternFunc testLocation modifiers name (map withTestLocationNode args) (map withTestLocationNode results))
+   ExtType (ExternType _ modifiers name generics) ->
+      ExtType (ExternType testLocation modifiers name generics)
 
 withTestLocationModuleDef :: ModuleDef -> ModuleDef
 withTestLocationModuleDef (ModuleDef _ name export) = ModuleDef testLocation name export

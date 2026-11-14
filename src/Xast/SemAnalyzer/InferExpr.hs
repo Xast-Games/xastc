@@ -138,7 +138,7 @@ inferType imports expression = case expression of
       typedBody <- withVars argVars (inferType imports body)
 
       resolvedArgTypes <- mapM resolve argTypeVars
-      let exprType = TyFn resolvedArgTypes (typeOf typedBody)
+      let exprType = functionType (map readOnly resolvedArgTypes) [readOnly (typeOf typedBody)]
       pure $ ExpLambda (TypedInfo location exprType maybeResolution) (Lambda typedArgs typedBody)
 
    ExpRecConstruct (ResolvedInfo location maybeResolution) (RecConstruct bindAlias ctorName assigns) -> do
@@ -151,9 +151,9 @@ inferType imports expression = case expression of
 
       (exprType, typedAssigns) <- case maybeSymbol of
          Just symbol@(SymbolCtor _ _ (CtorSig owner _ maybeFieldNames _)) -> do
-            resultType <- ctorType location symbol
-            let (fieldTypes, ctorResultTy) = case resultType of
-                  TyFn args result -> (args, result)
+            resType <- ctorType location symbol
+            let (fieldTypes, ctorResultTy) = case resType of
+                  TyFn params results -> (map (.ty) params, joinResults results)
                   result           -> ([], result)
                 fieldTypeOf field = lookup field (zip (fromMaybe [] maybeFieldNames) fieldTypes)
             typedFieldAssigns <- forM assigns $ \(RecAssign fieldName value) -> do
@@ -233,13 +233,13 @@ recordFieldsOf imports location recordType = case typeHead recordType of
       case declared >>= asConstructor of
          Just symbol@(SymbolCtor _ _ (CtorSig _ _ (Just fieldNames) _)) -> do
             case declared >>= asType of
-               Just (SymbolType _ (TypeSig ctors _ _)) | S.size ctors > 1 -> do
+               Just (SymbolType _ (TypeSig ctors _ _ _)) | S.size ctors > 1 -> do
                   errSem (SEAmbiguousRecordAccess location ctorName (S.toList (S.delete ctorName ctors)))
                   pure Nothing
                _ -> do
-                  resultType <- ctorType location symbol
-                  let (fieldTypes, ctorResultTy) = case resultType of
-                        TyFn args result -> (args, result)
+                  resType <- ctorType location symbol
+                  let (fieldTypes, ctorResultTy) = case resType of
+                        TyFn params results -> (map (.ty) params, joinResults results)
                         result           -> ([], result)
                   unify location ctorResultTy recordType
                   resolvedFieldTypes <- mapM resolve fieldTypes

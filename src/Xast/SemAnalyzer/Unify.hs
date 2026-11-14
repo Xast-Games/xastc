@@ -56,7 +56,7 @@ freeTyVars ty = go [ty] S.empty
          TyVar varId      -> go rest (S.insert varId accumulator)
          TyApp func arg   -> go (func : arg : rest) accumulator
          TyTuple elements -> go (elements ++ rest) accumulator
-         TyFn args ret    -> go (ret : args ++ rest) accumulator
+         TyFn params results -> go (functionTypes params results ++ rest) accumulator
          _                -> go rest accumulator
 
 generalize :: Type -> SemAnalyzer [Int]
@@ -123,7 +123,7 @@ resolve t = do
       go substitution (TyVar varId) = maybe (TyVar varId) (go substitution) (M.lookup varId substitution)
       go substitution (TyApp func arg) = TyApp (go substitution func) (go substitution arg)
       go substitution (TyTuple elements) = TyTuple (map (go substitution) elements)
-      go substitution (TyFn args result) = TyFn (map (go substitution) args) (go substitution result)
+      go substitution (TyFn params results) = functionType (map (mapMarked (go substitution)) params) (map (mapMarked (go substitution)) results)
       go _ other = other
 
 bindVar :: Int -> Type -> SemAnalyzer ()
@@ -135,7 +135,7 @@ zonkType substitution = go
       go (TyVar varId) = maybe (TyVar varId) go (M.lookup varId substitution)
       go (TyApp func arg) = TyApp (go func) (go arg)
       go (TyTuple elements) = TyTuple (map go elements)
-      go (TyFn args result) = TyFn (map go args) (go result)
+      go (TyFn params results) = functionType (map (mapMarked go) params) (map (mapMarked go) results)
       go other = other
 
 zonkTyped :: M.Map Int Type -> Typed -> Typed
@@ -161,9 +161,11 @@ unify location left right = do
       (TyTuple xs, TyTuple ys) | length xs == length ys ->
          zipWithM_ (unify location) xs ys
 
-      (TyFn args1 r1, TyFn args2 r2) | length args1 == length args2 -> do
-         zipWithM_ (unify location) args1 args2
-         unify location r1 r2
+      -- function types are equal only if their marks are
+      (TyFn params1 results1, TyFn params2 results2)
+         | map (.mark) params1 == map (.mark) params2 && sameResultMarks results1 results2 -> do
+            zipWithM_ (unify location) (map (.ty) params1) (map (.ty) params2)
+            unifyResults location results1 results2
 
       (TyInvalid, _) -> pure ()
       (_, TyInvalid) -> pure ()
@@ -245,35 +247,50 @@ occursCheckType varId t = do
       TyVar otherId    -> pure (varId == otherId)
       TyApp func arg   -> (||) <$> occursCheckType varId func <*> occursCheckType varId arg
       TyTuple elements -> or <$> mapM (occursCheckType varId) elements
-      TyFn args ret    -> ((||) . or <$> mapM (occursCheckType varId) args) <*> occursCheckType varId ret
+      TyFn params results -> or <$> mapM (occursCheckType varId) (functionTypes params results)
       _                -> pure False
 
 -- | Instantiates a signature: one fresh variable per generic and per intrinsic
 --   kind, so all @number@s in a signature are the same type.
+-- | Results with the same marks: slot by slot, or none taken on either side,
+--   where @fn() -> t0@ may still turn out to return a tuple.
+sameResultMarks :: [MarkedType] -> [MarkedType] -> Bool
+sameResultMarks results1 results2 =
+   map (.mark) results1 == map (.mark) results2 || all isRead (results1 ++ results2)
+
+isRead :: MarkedType -> Bool
+isRead marked = marked.mark == Read
+
+unifyResults :: Location -> [MarkedType] -> [MarkedType] -> SemAnalyzer ()
+unifyResults location results1 results2
+   | length results1 == length results2 = zipWithM_ (unify location) (map (.ty) results1) (map (.ty) results2)
+   | otherwise = unify location (joinResults results1) (joinResults results2)
+
 instantiate
    :: Location  -- ^ the expression that uses the function
    -> FuncSig
    -> SemAnalyzer Type
-instantiate location (FuncSig args ret) = do
-   let generics = S.toList (foldMap collectGnrs args <> collectGnrs ret)
+instantiate location signature = do
+   let types = functionTypes signature.params signature.results
+   let generics = S.toList (foldMap collectGnrs types)
    fresh <- mapM (const freshTyVar) generics
    let substitution = M.fromList (zip generics fresh)
 
-   let kinds = S.toList (foldMap collectIntrinsics args <> collectIntrinsics ret)
+   let kinds = S.toList (foldMap collectIntrinsics types)
    constrained <- mapM (freshConstrainedVar location) kinds
    let intrinsicSubstitution = M.fromList (zip kinds constrained)
 
    let instantiateType type' = type'
          |> substGnr substitution
          |> substIntrinsic intrinsicSubstitution
-   pure $ TyFn (map instantiateType args) (instantiateType ret)
+   pure $ functionType (map (mapMarked instantiateType) signature.params) (map (mapMarked instantiateType) signature.results)
 
 collectIntrinsics :: Type -> S.Set TyIntrinsic
 collectIntrinsics = \case
    TyInt kind       -> S.singleton kind
    TyApp func arg   -> collectIntrinsics func <> collectIntrinsics arg
    TyTuple elements -> foldMap collectIntrinsics elements
-   TyFn args result -> foldMap collectIntrinsics args <> collectIntrinsics result
+   TyFn params results -> foldMap collectIntrinsics (functionTypes params results)
    _                -> S.empty
 
 substIntrinsic :: M.Map TyIntrinsic Type -> Type -> Type
@@ -281,7 +298,7 @@ substIntrinsic substitution = \case
    TyInt kind       -> M.findWithDefault (TyInt kind) kind substitution
    TyApp func arg   -> TyApp (substIntrinsic substitution func) (substIntrinsic substitution arg)
    TyTuple elements -> TyTuple (map (substIntrinsic substitution) elements)
-   TyFn args result -> TyFn (map (substIntrinsic substitution) args) (substIntrinsic substitution result)
+   TyFn params results -> functionType (map (mapMarked (substIntrinsic substitution)) params) (map (mapMarked (substIntrinsic substitution)) results)
    other            -> other
 
 collectGnrs :: Type -> S.Set Ident
@@ -289,7 +306,7 @@ collectGnrs = \case
    TyGnr name       -> S.singleton name
    TyApp func arg   -> collectGnrs func <> collectGnrs arg
    TyTuple elements -> foldMap collectGnrs elements
-   TyFn args result -> foldMap collectGnrs args <> collectGnrs result
+   TyFn params results -> foldMap collectGnrs (functionTypes params results)
    _                -> S.empty
 
 substGnr :: M.Map Ident Type -> Type -> Type
@@ -297,7 +314,7 @@ substGnr substitution = \case
    TyGnr name       -> M.findWithDefault (TyGnr name) name substitution
    TyApp func arg   -> TyApp (substGnr substitution func) (substGnr substitution arg)
    TyTuple elements -> TyTuple (map (substGnr substitution) elements)
-   TyFn args result -> TyFn (map (substGnr substitution) args) (substGnr substitution result)
+   TyFn params results -> functionType (map (mapMarked (substGnr substitution)) params) (map (mapMarked (substGnr substitution)) results)
    other            -> other
 
 substTyVars :: M.Map Int Type -> Type -> Type
@@ -305,7 +322,7 @@ substTyVars substitution = \case
    TyVar varId      -> M.findWithDefault (TyVar varId) varId substitution
    TyApp func arg   -> TyApp (substTyVars substitution func) (substTyVars substitution arg)
    TyTuple elements -> TyTuple (map (substTyVars substitution) elements)
-   TyFn args result -> TyFn (map (substTyVars substitution) args) (substTyVars substitution result)
+   TyFn params results -> functionType (map (mapMarked (substTyVars substitution)) params) (map (mapMarked (substTyVars substitution)) results)
    other            -> other
 
 typeOf :: Expr Typed -> Type

@@ -6,6 +6,7 @@ import Data.List (intercalate)
 import GHC.Generics (Generic)
 import Data.Text (Text, unpack, pack)
 import Text.Megaparsec (SourcePos)
+import Xast.Utils.Generic ((|>))
 
 data Located a = Located
    { location :: Location
@@ -41,6 +42,8 @@ displayModifier = \case
    ModParallel             -> "@Parallel"
    ModSingleton            -> "@Singleton"
    ModCopyable _           -> "@Copyable"
+   ModPod                  -> "@Pod"
+   ModDrop _               -> "@Drop"
    ModTag                  -> "@Tag"
    ModNonExhaustive        -> "@NonExhaustive"
    ModIntrinsic            -> "@Intrinsic"
@@ -58,6 +61,8 @@ data Modifier
    | ModParallel
    | ModSingleton
    | ModCopyable (Maybe FunctionName)  -- ^ with the function that copies it, e.g. @\@Copyable(cloneVec)@
+   | ModPod                            -- ^ copied bit by bit
+   | ModDrop FunctionName              -- ^ the function called at the last use, e.g. @\@Drop(dropVec)@
    | ModTag
    | ModNonExhaustive
    | ModIntrinsic
@@ -69,6 +74,7 @@ data ModifierTarget
    | OnExternFunction
    | OnSystem
    | OnType
+   | OnExternType
    deriving (Eq, Show)
 
 -- | Where a modifier may be written, e.g. @\@Inline@ on functions and extern functions.
@@ -84,7 +90,9 @@ modifierTargets = \case
    ModLabel _              -> [OnSystem]
    ModParallel             -> [OnSystem]
    ModSingleton            -> [OnType]
-   ModCopyable _           -> [OnType]
+   ModCopyable _           -> [OnType, OnExternType]
+   ModPod                  -> [OnType, OnExternType]
+   ModDrop _               -> [OnType, OnExternType]
    ModTag                  -> [OnType]
    ModNonExhaustive        -> [OnType]
    ModIntrinsic            -> [OnExternFunction]
@@ -95,6 +103,7 @@ displayTarget = \case
    OnExternFunction -> "an extern function"
    OnSystem         -> "a system"
    OnType           -> "a type"
+   OnExternType     -> "an extern type"
 
 data ComponentDispatchMode
    = CDMStrict
@@ -326,13 +335,14 @@ data ExternFunc = ExternFunc
    { location  :: Location
    , modifiers :: [Modifier]
    , name      :: FunctionName
-   , args      :: [Located Type]
-   , retType   :: Located Type
+   , args      :: [Located MarkedType]
+   , results   :: [Located MarkedType]  -- ^ one slot, or the slots of a tuple with a @*@: @(Int, *Console)@
    }
    deriving (Eq, Show)
 
 data ExternType = ExternType
    { location  :: Location
+   , modifiers :: [Modifier]
    , name      :: TypeName
    , generics  :: [GenericName]
    }
@@ -346,8 +356,8 @@ data FuncDef = FuncDef
    { location  :: Location
    , modifiers :: [Modifier]
    , name      :: FunctionName
-   , args      :: [Located Type]
-   , retType   :: Located Type
+   , args      :: [Located MarkedType]
+   , results   :: [Located MarkedType]  -- ^ one slot, or the slots of a tuple with a @*@: @(Int, *Console)@
    }
    deriving (Eq, Show)
 
@@ -578,15 +588,68 @@ data Field = Field      -- fieldOne : Int
    deriving (Eq, Show)
 
 data Type
-   = TyGnr GenericName        -- a, b, c...
-   | TyCon QualifiedIdent  -- Bool, Int, String
-   | TyApp Type Type    -- Maybe a, Either a Int...
-   | TyTuple [Type]     -- (Bool, a, Maybe String)
-   | TyFn [Type] Type   -- fn(Type1, Type2 ... TypeN) -> TypeRet
-   | TyVar Int          -- t0, t3
-   | TyInt TyIntrinsic  -- number, concatenative
-   | TyInvalid          -- <invalid>
+   = TyGnr GenericName              -- a, b, c...
+   | TyCon QualifiedIdent           -- Bool, Int, String
+   | TyApp Type Type                -- Maybe a, Either a Int...
+   | TyTuple [Type]                 -- (Bool, a, Maybe String)
+   | TyFn [MarkedType] [MarkedType] -- fn(Type1, *Type2 ... TypeN) -> TypeRet: parameters, then result slots
+   | TyVar Int                      -- t0, t3
+   | TyInt TyIntrinsic              -- number, concatenative
+   | TyInvalid                      -- <invalid>
    deriving (Eq, Ord, Show)
+
+-- | A parameter or a result with its mark, e.g. @*Vec a@. The mark is how the
+--   value is passed, not a part of its type.
+data MarkedType = MarkedType
+   { mark :: Mark
+   , ty   :: Type
+   }
+   deriving (Eq, Ord, Show)
+
+data Mark
+   = Read  -- ^ @T@: the function reads the value, and the caller keeps it
+   | Take  -- ^ @*T@: the function owns the value; as a result, it hands one back
+   deriving (Eq, Ord, Show)
+
+-- | An unmarked parameter or result.
+readOnly :: Type -> MarkedType
+readOnly = MarkedType Read
+
+-- | A function type whose unmarked results are split into slots, so that
+--   @fn() -> (a, b)@ has one form whether or not its result was known to be a tuple.
+functionType :: [MarkedType] -> [MarkedType] -> Type
+functionType params results
+   | any isTaken results = TyFn params results
+   | otherwise           = TyFn params (splitIntoSlots results)
+
+isTaken :: MarkedType -> Bool
+isTaken marked = marked.mark == Take
+
+-- | Unmarked results as slots, e.g. one result @(a, b)@ becomes the two slots @a@ and @b@.
+splitIntoSlots :: [MarkedType] -> [MarkedType]
+splitIntoSlots results = results
+   |> concatMap (\result -> resultSlots result.ty)
+   |> map readOnly
+
+-- | Changes the type of a parameter or result, keeping its mark.
+mapMarked :: (Type -> Type) -> MarkedType -> MarkedType
+mapMarked change marked = MarkedType marked.mark (change marked.ty)
+
+-- | Every type of a function type: its parameters, then its results.
+functionTypes :: [MarkedType] -> [MarkedType] -> [Type]
+functionTypes params results = map (.ty) (params ++ results)
+
+-- | The slots of a result type: @(Int, Console)@ has two, @()@ none, any other type one.
+resultSlots :: Type -> [Type]
+resultSlots = \case
+   TyTuple elements | length elements /= 1 -> elements
+   result                                  -> [result]
+
+-- | The type a call returns: @(Int, Console)@ for the results of @-> (Int, *Console)@.
+joinResults :: [MarkedType] -> Type
+joinResults = \case
+   [single] -> single.ty
+   results  -> TyTuple (map (.ty) results)
 
 -- | A name together with the module that declares it.
 data QualifiedIdent = QualifiedIdent
@@ -642,7 +705,11 @@ typename :: Type -> String
 typename (TyGnr ident) = show ident
 typename (TyCon qualified) = show qualified.name
 typename (TyTuple xs) = "(" ++ intercalate ", " (map typename xs) ++ ")"
-typename (TyFn args ret) = "fn(" ++ intercalate ", " (map typename args) ++ ") -> " ++ typename ret 
+typename (TyFn params results) =
+   let shownResults = case results of
+         [single] -> markedName single
+         _        -> "(" ++ intercalate ", " (map markedName results) ++ ")"
+   in "fn(" ++ intercalate ", " (map markedName params) ++ ") -> " ++ shownResults
 typename (TyApp applicant operand) =
    let (headTy, args) = tyAppSpine applicant operand
    in unwords (typename headTy : map typenameArg args)
@@ -650,6 +717,12 @@ typename (TyVar n) = "t" ++ show (n `mod` 10)
 typename (TyInt TyNumber) = "number"
 typename (TyInt TyConcat) = "concatenative"
 typename TyInvalid = "<invalid>"
+
+-- | A type with @*@ in front if it is taken, e.g. @*Vec a@.
+markedName :: MarkedType -> String
+markedName marked = case marked.mark of
+   Take -> "*" ++ typename marked.ty
+   Read -> typename marked.ty
 
 tyAppSpine :: Type -> Type -> (Type, [Type])
 tyAppSpine (TyApp applicant' operand') operand =
@@ -663,5 +736,5 @@ typenameArg ty
    | otherwise      = typename ty
    where
       needsParens (TyApp _ _) = True
-      needsParens (TyFn _ _)  = True
+      needsParens (TyFn {})   = True
       needsParens _           = False

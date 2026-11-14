@@ -84,7 +84,7 @@ genericFunctionNames :: Program Desugared -> S.Set FunctionName
 genericFunctionNames program = S.fromList
    [ funcDef.name
    | StmtFunc (FnDef funcDef) <- program.stmts
-   , any (isPolymorphic . (.node)) (funcDef.retType : funcDef.args)
+   , any (isPolymorphic . (.ty) . (.node)) (funcDef.args ++ funcDef.results)
    ]
 
 isPolymorphic :: Type -> Bool
@@ -93,5 +93,5 @@ isPolymorphic = \case
    TyInt _          -> True
    TyApp func arg   -> isPolymorphic func || isPolymorphic arg
    TyTuple elements -> any isPolymorphic elements
-   TyFn args result -> any isPolymorphic args || isPolymorphic result
+   TyFn params results -> any isPolymorphic (functionTypes params results)
    _                -> False

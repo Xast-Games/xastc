@@ -5,7 +5,7 @@ module Xast.SemAnalyzer.Pass where
 
 import Control.Monad.Except (ExceptT(..))
 import Control.Monad.State
-import Control.Monad (forM)
+import Control.Monad (forM, forM_)
 import qualified Data.Set as S
 import qualified Data.Map as M
 import Xast.AST
@@ -15,6 +15,7 @@ import Xast.SemAnalyzer.Types
 import Xast.Utils.Compiler (Target)
 import Xast.SemAnalyzer.ResolveNames (resolveNames)
 import Xast.SemAnalyzer.TypeUsages (resolveTypeUsages)
+import Xast.SemAnalyzer.Ownership (checkOwnership)
 import Xast.SemAnalyzer.Declare (declareStmts)
 import Xast.SemAnalyzer.Imports (importAnalysis)
 import Xast.SemAnalyzer.TypeCheck (typeCheck)
@@ -41,7 +42,7 @@ fullAnalysis reportWarnings saveFile programs packageOfModule target = do
    (_, symTable2, warnings2) <- ExceptT $ pure $ runPhase env symTable1 (importAnalysis programs)
    lift $ reportWarnings warnings2
 
-   (programsQualified, symTable3, warnings3) <- ExceptT $ pure $ runPhase env symTable2 (forM programs resolveTypeUsages)
+   (programsQualified, symTable3, warnings3) <- ExceptT $ pure $ runPhase env symTable2 (forM programs resolveTypeUsages >>= checkedOwnership)
    lift $ reportWarnings warnings3
 
    (programsResolved, symTable4, warnings4) <- ExceptT $ pure $ runPhase env symTable3 (forM programsQualified resolveNames)
@@ -89,8 +90,8 @@ collectFunctionModules symTable = M.fromList
 intrinsicDecl :: Program Desugared -> ExternFunc -> IntrinsicDecl
 intrinsicDecl program extern = IntrinsicDecl
    { name    = QualifiedIdent { moduleName = Just program.moduleDef.name, name = extern.name }
-   , args    = map (.node) extern.args
-   , retType = extern.retType.node
+   , args    = map ((.ty) . (.node)) extern.args
+   , retType = joinResults (map (.node) extern.results)
    }
 
 -- | Number of constructors of the owning type for every constructor id
@@ -113,3 +114,9 @@ collectCtorSpans symTable = M.fromList
       typeSignatureSpan typeSignature
          | typeSignature.nonExhaustive = maxBound
          | otherwise                   = S.size typeSignature.ctors
+
+-- | Checks @Copyable, @Pod and @Drop once every type usage is qualified.
+checkedOwnership :: [Program Parsed] -> SemAnalyzer [Program Parsed]
+checkedOwnership programs = do
+   forM_ programs checkOwnership
+   pure programs

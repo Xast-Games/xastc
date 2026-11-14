@@ -25,7 +25,7 @@ subst substitution = \case
    TyGnr name         -> M.findWithDefault (TyGnr name) name substitution
    TyApp func arg     -> TyApp (subst substitution func) (subst substitution arg)
    TyTuple elements   -> TyTuple (map (subst substitution) elements)
-   TyFn params result -> TyFn (map (subst substitution) params) (subst substitution result)
+   TyFn params res    -> functionType (map (mapMarked (subst substitution)) params) (map (mapMarked (subst substitution)) res)
    other              -> other
 
 monoType :: Type -> Lowerer Type
@@ -47,8 +47,12 @@ monoType type' = case splitApp type' of
          tupleKirName <- requestType tupleInst
          return (monomorphicType tupleKirName)
 
-      TyFn params result -> TyFn <$> mapM monoType params <*> monoType result
+      TyFn params results -> functionType <$> mapM monoMarked params <*> mapM monoMarked results
       _                  -> pure type'
+
+-- | A parameter or result with its type made monomorphic; the mark is kept.
+monoMarked :: MarkedType -> Lowerer MarkedType
+monoMarked marked = MarkedType marked.mark <$> monoType marked.ty
 
 -- | The type of a monomorphized instance. Its name is already the final flat name,
 --   module prefix included, so it is not qualified again.
@@ -90,7 +94,7 @@ lookupFunctionTemplate name = gets (M.lookup name . (.funcTmpls)) >>= \case
 
 -- | E.g. @fn(Option a) -> Bool@ for @fn isSome (Option a) -> Bool;@
 signatureType :: FuncDef -> Type
-signatureType funcDef = TyFn (map (.node) funcDef.args) funcDef.retType.node
+signatureType funcDef = functionType (map (.node) funcDef.args) (map (.node) funcDef.results)
 
 enqueueFunction :: FunctionRequest -> Lowerer ()
 enqueueFunction request = modify $ \state -> state
@@ -106,7 +110,7 @@ substituteTypeParams typeParams type' = case M.lookup type' typeParams of
    Nothing    -> case type' of
       TyApp func arg   -> TyApp (substituteTypeParams typeParams func) (substituteTypeParams typeParams arg)
       TyTuple elements -> TyTuple (map (substituteTypeParams typeParams) elements)
-      TyFn args result -> TyFn (map (substituteTypeParams typeParams) args) (substituteTypeParams typeParams result)
+      TyFn params results -> functionType (map (mapMarked (substituteTypeParams typeParams)) params) (map (mapMarked (substituteTypeParams typeParams)) results)
       other            -> other
 
 -- | Requests an intrinsic instance for the types of one use.
@@ -116,7 +120,7 @@ requestIntrinsic
    -> Type  -- ^ type at this use, e.g. @fn(Int, Int) -> Int@
    -> Lowerer KirName
 requestIntrinsic decl usedType = do
-   let declaredType = TyFn decl.args decl.retType
+   let declaredType = functionType (map readOnly decl.args) [readOnly decl.retType]
    let typeParams = bindTypeParams declaredType usedType
    typeArgs <- mapM monoType (M.elems typeParams)
    let instance' = TypeInst { name = decl.name, args = typeArgs }
@@ -138,9 +142,9 @@ requestIntrinsic decl usedType = do
 --   e.g. @([Int, Int], Bool)@ for @fn(Int, Int) -> Bool@.
 monoSignature :: Type -> Lowerer ([Type], Type)
 monoSignature = \case
-   TyFn params result -> do
-      monoParams <- mapM monoType params
-      monoResult <- monoType result
+   TyFn params results -> do
+      monoParams <- mapM (monoType . (.ty)) params
+      monoResult <- monoType (joinResults results)
       pure (monoParams, monoResult)
    other -> error ("function used at a non-function type " ++ show other)
 
@@ -157,8 +161,10 @@ bindTypeParams declared used = case (declared, used) of
       bindTypeParams declaredFunc usedFunc <> bindTypeParams declaredArg usedArg
    (TyTuple declaredElements, TyTuple usedElements) ->
       M.unions (zipWith bindTypeParams declaredElements usedElements)
-   (TyFn declaredParams declaredResult, TyFn usedParams usedResult) ->
-      M.unions (zipWith bindTypeParams declaredParams usedParams) <> bindTypeParams declaredResult usedResult
+   (TyFn declaredParams declaredResults, TyFn usedParams usedResults) ->
+      let declaredTypes = map (.ty) declaredParams ++ [joinResults declaredResults]
+          usedTypes = map (.ty) usedParams ++ [joinResults usedResults]
+      in M.unions (zipWith bindTypeParams declaredTypes usedTypes)
    _                            -> M.empty
 
 -- | Requests every @Tag type up front. Other types are instantiated only when
@@ -271,7 +277,7 @@ qualifiedCtor resultType ctorName = case splitApp resultType of
 
 ctorResultTy :: Type -> Type
 ctorResultTy = \case
-   TyFn _ result -> result
+   TyFn _ results -> joinResults results
    other         -> other
 
 mangle :: TypeInst -> Text
@@ -290,8 +296,17 @@ mangleArg type' = case splitApp type' of
    (TyCon qualified, args) -> wrap (mangle (TypeInst qualified args))
    _                  -> case type' of
       TyTuple elements   -> wrap (mangle (TypeInst (tupleName (length elements)) elements))
-      TyFn params result -> wrap (joinToken ("fn"  <> tshow (length params)) (params ++ [result]))
+      TyFn params results ->
+         let token = "fn" <> tshow (length params) <> marksToken params results
+         in wrap (joinToken token (map (.ty) params ++ [joinResults results]))
       _                  -> error ("mangling: unexpected type " ++ show type')
+
+-- | The @*@ of a function type in a mangled name, e.g. @t1h0@ for
+--   @fn(Int, *Vec a) -> *Vec a@: instances that differ only in marks get different names.
+marksToken :: [MarkedType] -> [MarkedType] -> Text
+marksToken params results =
+   let takenAt marked = [ index | (index, MarkedType Take _) <- zip [0 :: Int ..] marked ]
+   in T.concat (map (("t" <>) . tshow) (takenAt params) ++ map (("h" <>) . tshow) (takenAt results))
 
 wrap :: Text -> Text
 wrap text = "_" <> text <> "_"

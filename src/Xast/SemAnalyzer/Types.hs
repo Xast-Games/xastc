@@ -3,6 +3,7 @@ module Xast.SemAnalyzer.Types where
 
 import qualified Data.Map as M
 import qualified Data.Set as S
+import Data.Maybe (listToMaybe)
 
 import Xast.AST
 import Xast.Utils.Compiler (Target)
@@ -113,8 +114,39 @@ data SymbolInfo
       , externId :: ExternId
       , funcSig  :: FuncSig
       }
-   | SymbolExternType Location
+   | SymbolExternType
+      { location  :: Location
+      , ownership :: Ownership
+      }
    deriving (Eq, Show)
+
+-- | How values of a type are copied and dropped, from its modifiers.
+data Ownership = Ownership
+   { copyability :: Copyability
+   , dropFn      :: Maybe FunctionName  -- ^ from @\@Drop(fn)@
+   }
+   deriving (Eq, Show)
+
+data Copyability
+   = NotCopyable
+   | Copyable                  -- ^ @\@Copyable@: field by field, when its type parameters are copyable
+   | CopyableWith FunctionName -- ^ @\@Copyable(fn)@: by calling @fn@
+   | Pod                       -- ^ @\@Pod@: bit by bit
+   deriving (Eq, Show)
+
+-- | The ownership a type declares with @\@Copyable@, @\@Pod@ and @\@Drop@.
+ownershipOf :: [Modifier] -> Ownership
+ownershipOf modifiers =
+   let copyability
+         | ModPod `elem` modifiers = Pod
+         | otherwise = case [ copyFn | ModCopyable copyFn <- modifiers ] of
+            Just copyFn : _ -> CopyableWith copyFn
+            Nothing : _     -> Copyable
+            []              -> NotCopyable
+   in Ownership
+      { copyability = copyability
+      , dropFn      = listToMaybe [ dropFn | ModDrop dropFn <- modifiers ]
+      }
 
 data CtorSig = CtorSig
    { owner        :: QualifiedIdent  -- ^ the type the constructor builds
@@ -128,6 +160,7 @@ data TypeSig = TypeSig
    { ctors         :: S.Set CtorName
    , generics      :: [GenericName]
    , nonExhaustive :: Bool
+   , ownership     :: Ownership
    }
    deriving (Eq, Show)
 
@@ -139,7 +172,7 @@ symbolLoc = \case
    SymbolFn loc _ _         -> loc
    SymbolSystem loc _       -> loc
    SymbolExternFn loc _ _   -> loc
-   SymbolExternType loc     -> loc
+   SymbolExternType loc _   -> loc
 
 data SystemSig = SystemSig
    { name      :: SystemName
@@ -160,16 +193,28 @@ newtype VarId = VarId { inner :: Int }
    deriving (Eq, Show)
 
 data FuncSig = FuncSig
-   { args      :: [Type]
-   , retType   :: Type
+   { params  :: [MarkedType]
+   , results :: [MarkedType]
    }
    deriving (Eq, Show)
 
 funcSig :: FuncDef -> FuncSig
-funcSig fn = FuncSig (map (.node) fn.args) fn.retType.node
+funcSig fn = FuncSig (map (.node) fn.args) (map (.node) fn.results)
 
 externFuncSig :: ExternFunc -> FuncSig
-externFuncSig fn = FuncSig (map (.node) fn.args) fn.retType.node
+externFuncSig fn = FuncSig (map (.node) fn.args) (map (.node) fn.results)
+
+-- | The parameter types, without their marks.
+paramTypes :: FuncSig -> [Type]
+paramTypes signature = map (.ty) signature.params
+
+-- | The type a call returns.
+resultType :: FuncSig -> Type
+resultType signature = joinResults signature.results
+
+-- | The type of the function itself, e.g. @fn(Int, *Vec a) -> *Vec a@.
+signatureType :: FuncSig -> Type
+signatureType signature = functionType signature.params signature.results
 
 systemSig :: SystemDef -> SystemSig
 systemSig def =

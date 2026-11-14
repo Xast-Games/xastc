@@ -14,7 +14,7 @@ import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Unify (freshConstructorId, freshExternId, freshFunctionId, collectIntrinsics)
 import Xast.SemAnalyzer.TypeUsages (payloadTypes)
 import Control.Monad.Reader (asks)
-import Xast.Codegen.C.Intrinsics (IntrinsicDefinition (..), intrinsicDefinitions)
+import Xast.Intrinsics (intrinsicArities)
 
 -- #### DECLARE STATEMENTS ####
 
@@ -56,7 +56,7 @@ declareStmt = \case
       declareExternFn ident externFunc
       checkIntrinsic externFunc
 
-   StmtExtern (ExtType externType@(ExternType _ ident _)) ->
+   StmtExtern (ExtType externType@(ExternType _ _ ident _)) ->
       declareExternType ident externType
 
    StmtSystem (SysDef systemDef@(SystemDef _ _ ident _ _ _)) ->
@@ -103,7 +103,7 @@ declareType ident typeDef@(TypeDef loc modifiers _ generics ctors) = do
    QualifiedName currentModule _ <- qualify ident
    let owner = QualifiedIdent { moduleName = Just currentModule, name = ident }
        ctorNames = S.fromList [ctor.name | ctor <- ctors]
-       typeSig = TypeSig ctorNames generics (ModNonExhaustive `elem` modifiers)
+       typeSig = TypeSig ctorNames generics (ModNonExhaustive `elem` modifiers) (ownershipOf modifiers)
 
    case [ctor | ctor <- ctors, ctor.name == ident] of
       [selfCtor] -> do
@@ -164,16 +164,16 @@ checkIntrinsic extern = do
 checkIntrinsicDefinition :: ExternFunc -> SemAnalyzer ()
 checkIntrinsicDefinition extern =
    let declaredArity = length extern.args
-       arityMismatch definition = SEIntrinsicArityMismatch
+       arityMismatch expectedArity = SEIntrinsicArityMismatch
          { location      = extern.location
          , name          = extern.name
-         , expectedArity = definition.arity
+         , expectedArity = expectedArity
          , actualArity   = declaredArity
          }
-   in case M.lookup extern.name intrinsicDefinitions of
+   in case M.lookup extern.name intrinsicArities of
       Nothing -> errSem (SEUnknownIntrinsic extern.location extern.name)
-      Just definition -> unless (definition.arity == declaredArity) $
-         errSem (arityMismatch definition)
+      Just expectedArity -> unless (expectedArity == declaredArity) $
+         errSem (arityMismatch expectedArity)
 
 isStdModule :: Module -> SemAnalyzer Bool
 isStdModule moduleName = do
@@ -189,8 +189,8 @@ checkNoIntrinsicTypes stmt = forM_ (declaredTypes stmt) $ \(Located location typ
 -- | The types written in a declaration.
 declaredTypes :: Stmt Parsed -> [Located Type]
 declaredTypes = \case
-   StmtFunc (FnDef funcDef)      -> funcDef.retType : funcDef.args
-   StmtExtern (ExtFunc extern)   -> extern.retType : extern.args
+   StmtFunc (FnDef funcDef)      -> map (fmap (.ty)) (funcDef.args ++ funcDef.results)
+   StmtExtern (ExtFunc extern)   -> map (fmap (.ty)) (extern.args ++ extern.results)
    StmtTypeDef typeDef           -> concatMap (payloadTypes . (.payload)) typeDef.ctors
    StmtSystem (SysDef systemDef) -> systemDef.retType : concatMap (.types) systemDef.entities
    _                             -> []
@@ -213,8 +213,8 @@ declareExternFn ident externFunc@(ExternFunc loc _ _ _ _) = do
    declareSymbol ident (SymbolExternFn loc externId (externFuncSig externFunc)) SEExternFnRedeclaration
 
 declareExternType :: Ident -> ExternType -> SemAnalyzer ()
-declareExternType ident (ExternType loc _ _) =
-   declareSymbol ident (SymbolExternType loc) SEExternTypeRedeclaration
+declareExternType ident (ExternType loc modifiers _ _) =
+   declareSymbol ident (SymbolExternType loc (ownershipOf modifiers)) SEExternTypeRedeclaration
 
 declareSystem :: Ident -> SystemDef -> SemAnalyzer ()
 declareSystem ident systemDef@(SystemDef loc _ _ _ _ _) =

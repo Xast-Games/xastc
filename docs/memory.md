@@ -57,6 +57,7 @@ type Vec a = Vec { data : RawPtr, len : USize, cap : USize };
 fn dropVec (*Vec a) -> ();
 ```
 
+- **ECS components** are owned by the ECS storage, not by a name, so they are not dropped at a last use. They are dropped where the program removes them: `removeComponent` and `removeEntity`, which take the `*CommandBuffer`. The ECS is part of the memory model. [decided] Entities can also disappear without such a call (a cascading delete, the end of the world); Flecs calls a per-component destructor hook in every such case, so `@Drop` will likely be registered as that hook. [proposed]
 - A **non-copyable type without `@Drop`** (a resource such as `File`) is not freed implicitly. It must be consumed (`uniqueness.md` 2.5), and the consuming function (`close`) is its destructor.
 - The free itself is an `Std.Alloc` call.
 

@@ -32,15 +32,15 @@ qualifyStmt imports stmt =
          qualifiedCtors <- forM ctors (qualifyCtor imports)
          pure $ StmtTypeDef (TypeDef location modifiers name generics qualifiedCtors)
 
-      StmtFunc (FnDef (FuncDef location modifiers name args retType)) -> do
-         qualifiedArgs <- forM args qualify
-         qualifiedRetType <- qualify retType
-         pure $ StmtFunc (FnDef (FuncDef location modifiers name qualifiedArgs qualifiedRetType))
+      StmtFunc (FnDef (FuncDef location modifiers name args results)) -> do
+         qualifiedArgs <- forM args (qualifyMarked imports)
+         qualifiedResults <- forM results (qualifyMarked imports)
+         pure $ StmtFunc (FnDef (FuncDef location modifiers name qualifiedArgs qualifiedResults))
 
-      StmtExtern (ExtFunc (ExternFunc location modifiers name args retType)) -> do
-         qualifiedArgs <- forM args qualify
-         qualifiedRetType <- qualify retType
-         pure $ StmtExtern (ExtFunc (ExternFunc location modifiers name qualifiedArgs qualifiedRetType))
+      StmtExtern (ExtFunc (ExternFunc location modifiers name args results)) -> do
+         qualifiedArgs <- forM args (qualifyMarked imports)
+         qualifiedResults <- forM results (qualifyMarked imports)
+         pure $ StmtExtern (ExtFunc (ExternFunc location modifiers name qualifiedArgs qualifiedResults))
 
       StmtSystem (SysDef (SystemDef location modifiers name entities retType with)) -> do
          qualifiedEntities <- forM entities $ \(QueriedEntity entityTypes) ->
@@ -50,6 +50,12 @@ qualifyStmt imports stmt =
          pure $ StmtSystem (SysDef (SystemDef location modifiers name qualifiedEntities qualifiedRetType qualifiedWith))
 
       other -> pure other
+
+-- | A parameter or result with its declaring modules filled in; the mark is kept.
+qualifyMarked :: [Located ImportDef] -> Located MarkedType -> SemAnalyzer (Located MarkedType)
+qualifyMarked imports (Located location marked) = do
+   qualified <- qualifyLocated imports (Located location marked.ty)
+   pure (Located location (MarkedType marked.mark qualified.node))
 
 qualifyCtor :: [Located ImportDef] -> Ctor -> SemAnalyzer Ctor
 qualifyCtor imports (Ctor location name payload) = do
@@ -83,6 +89,7 @@ qualifyType
    -> SemAnalyzer Type
 qualifyType imports reportUnknown type' =
    let qualifyInner = qualifyType imports reportUnknown
+       qualifyMarkedInner marked = MarkedType marked.mark <$> qualifyInner marked.ty
    in case type' of
       TyCon (QualifiedIdent (Just _) _) -> pure type'
       TyCon (QualifiedIdent Nothing name) -> do
@@ -92,7 +99,7 @@ qualifyType imports reportUnknown type' =
             Nothing      -> reportUnknown name >> pure type'
       TyApp func arg       -> TyApp <$> qualifyInner func <*> qualifyInner arg
       TyTuple elementTypes -> TyTuple <$> mapM qualifyInner elementTypes
-      TyFn args ret        -> TyFn <$> mapM qualifyInner args <*> qualifyInner ret
+      TyFn params results  -> functionType <$> mapM qualifyMarkedInner params <*> mapM qualifyMarkedInner results
       TyGnr _              -> pure type'
       TyVar _              -> pure type'
       TyInt _              -> pure type'

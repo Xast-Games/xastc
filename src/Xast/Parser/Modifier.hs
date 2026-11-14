@@ -25,6 +25,8 @@ modifier = "@" *> choice
    , ModParallel           <$ symbol "Parallel"
    , ModSingleton          <$ symbol "Singleton"
    , ModCopyable           <$ symbol "Copyable" <*> optional (between (symbol "(") (symbol ")") (fnIdent <?> "copy function name"))
+   , ModPod                <$ symbol "Pod"
+   , ModDrop               <$ symbol "Drop" <*> between (symbol "(") (symbol ")") (fnIdent <?> "drop function name")
    , ModTag                <$ symbol "Tag"
    , ModNonExhaustive      <$ symbol "NonExhaustive"
    , ModIntrinsic          <$ symbol "Intrinsic"

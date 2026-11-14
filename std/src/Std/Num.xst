@@ -1,25 +1,37 @@
 module Std.Num exports *
 
+@Pod
 extern type Size;
 
+@Pod
 extern type USize;
 
+@Pod
 extern type Long;
 
+@Pod
 extern type ULong;
 
+@Pod
 extern type Int;
 
+@Pod
 extern type UInt;
 
+@Pod
 extern type Short;
 
+@Pod
 extern type UShort;
 
+@Pod
 extern type Byte;
 
+@Pod
 extern type UByte;
 
+@Pod
 extern type Float;
 
+@Pod
 extern type Double;

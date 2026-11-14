@@ -136,8 +136,8 @@ intrinsicCallee decl calleeType resultType = do
    requestIntrinsic decl calleeType
 
 isFunctionType :: Type -> Bool
-isFunctionType (TyFn _ _) = True
-isFunctionType _          = False
+isFunctionType (TyFn {}) = True
+isFunctionType _         = False
 
 lowerLetBindings
    :: M.Map LocalId KirValue

@@ -41,6 +41,7 @@ unitDef :: KirTypeDef
 unitDef = KirTypeDef
    { name  = KirName "Unit"
    , ctors = [KirCtor { name = unitCtor, fields = [] }]
+   , mods  = []
    }
 
 -- type Wrapper = Wrapper { u : Unit, n : Int }
@@ -48,6 +49,7 @@ wrapperDef :: KirTypeDef
 wrapperDef = KirTypeDef
    { name  = KirName "Wrapper"
    , ctors = [KirCtor { name = Ident "Wrapper", fields = [fieldOf "u" unitType, fieldOf "n" intType] }]
+   , mods  = []
    }
 
 -- type Only = Only { u : Unit }, zero-sized because its only field is
@@ -55,6 +57,7 @@ onlyDef :: KirTypeDef
 onlyDef = KirTypeDef
    { name  = KirName "Only"
    , ctors = [KirCtor { name = Ident "Only", fields = [fieldOf "u" unitType] }]
+   , mods  = []
    }
 
 typeDefs :: [KirTypeDef]

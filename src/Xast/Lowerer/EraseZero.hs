@@ -393,7 +393,7 @@ isZeroSized :: S.Set KirName -> Type -> Bool
 isZeroSized zstNames = \case
    TyCon qualified -> KirName qualified.name.inner `S.member` zstNames
    TyTuple [] -> True
-   TyFn _ _   -> False
+   TyFn {}    -> False
    other      -> unreachableWith $ "invalid type in EraseZero phase: " <> show other
 
 zstSet :: [KirTypeDef] -> S.Set KirName
@@ -455,7 +455,7 @@ notUnit _ = True
 fieldTypeName :: Type -> Maybe KirName
 fieldTypeName = \case
    TyCon qualified -> Just (KirName qualified.name.inner)
-   TyFn _ _   -> Nothing
+   TyFn {}    -> Nothing
    TyTuple [] -> Nothing
    other      -> unreachableWith $ "invalid type in EraseZero phase: " <> show other
 

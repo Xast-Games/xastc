@@ -2,7 +2,8 @@
 {-# LANGUAGE RecordWildCards #-}
 module Xast.Parser.Type where
 
-import Text.Megaparsec (choice, sepBy, between, some, MonadParsec (try), many, sepBy1, sepEndBy)
+import Text.Megaparsec (choice, sepBy, between, some, MonadParsec (try), many, sepBy1, sepEndBy, optional)
+import Data.Maybe (isJust)
 
 import Xast.Parser.Ident
 import Xast.Parser.Common (Parser, symbol, lexeme, endOfStmt, withLoc, located)
@@ -52,15 +53,45 @@ type' = do
 atomType :: Parser Type
 atomType = choice
    [ tupleOrParens
-   , TyFn 
-      <$ symbol "fn" 
-      <*> between (symbol "(") (symbol ")") (type' `sepBy` symbol ",")
-      <* symbol "->"
-      <*> type'
+   , fnType
    , unresolvedType <$> typeIdent
    , TyInt <$> try typeIntrinsic
    , TyGnr <$> genericIdent
    ]
+
+-- | @fn(Int, *Vec a) -> *Vec a@.
+fnType :: Parser Type
+fnType = do
+   _       <- symbol "fn"
+   params  <- markedParams
+   _       <- symbol "->"
+   results <- markedResults
+   pure (functionType (map (.node) params) (map (.node) results))
+
+-- | Parameters in parentheses, each a type with an optional @*@: @(Int, *Vec a)@.
+markedParams :: Parser [Located MarkedType]
+markedParams = between (symbol "(") (symbol ")") (markedType `sepBy` symbol ",")
+
+-- | One result, @*Vec a@, or a tuple of results with a @*@: @(Int, *Console)@.
+markedResults :: Parser [Located MarkedType]
+markedResults = choice
+   [ try markedTuple
+   , (: []) <$> markedType
+   ]
+
+markedTuple :: Parser [Located MarkedType]
+markedTuple = do
+   elements <- between (symbol "(") (symbol ")") (markedType `sepBy1` symbol ",")
+   if length elements < 2 || all ((== Read) . (.mark) . (.node)) elements
+      then fail "not a tuple of results with a `*`"
+      else pure elements
+
+-- | A type with an optional @*@ in front.
+markedType :: Parser (Located MarkedType)
+markedType = located $ do
+   star <- optional (symbol "*")
+   ty   <- type'
+   pure MarkedType { mark = if isJust star then Take else Read, ty = ty }
 
 typeIntrinsic :: Parser TyIntrinsic
 typeIntrinsic = choice

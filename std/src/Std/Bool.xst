@@ -1,3 +1,4 @@
 module Std.Bool exports *
 
+@Pod 
 type Bool = True | False;

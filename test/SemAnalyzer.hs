@@ -13,6 +13,8 @@ import Test.HUnit
 import Xast.Error.Types
 import Xast.AST (PackageName, stdPackageName, Program (..), ModuleDef (..), Ident (..))
 import Xast.SemAnalyzer.Declare (hasMisplacedPrime)
+import Xast.Intrinsics (intrinsicArities)
+import Xast.Codegen.C.Intrinsics (intrinsicBodies)
 import Xast.Parser.Program (parseProgram)
 import Xast.SemAnalyzer.Pass (fullAnalysis)
 import Xast.SemAnalyzer.Types (AnalysisResult)
@@ -30,6 +32,8 @@ tests = TestList
    , TestLabel "Intrinsic declarations" intrinsicDeclarationTests
    , TestLabel "Match exhaustiveness" exhaustivenessTests
    , TestLabel "Unique variants"      uniqueVariantTests
+   , TestLabel "Copyability"          copyabilityTests
+   , TestLabel "Parameter modes"      parameterModeTests
    , TestLabel "Systems"              systemTests
    ]
 
@@ -596,6 +600,89 @@ exhaustivenessTests = TestList
       ]
    ]
 
+parameterModeTests :: Test
+parameterModeTests = TestList
+   [ named "a write hands back its `*` parameter" $ assertAnalyzes $ inModule
+      [ "extern type V;", "fn push (Int, *V) -> *V;", "fn push x v = v;" ]
+
+   , named "a result handed back with another value" $ assertAnalyzes $ inModule
+      [ "extern type Console;", "extern fn readInt (*Console) -> (Int, *Console);" ]
+
+   , named "`*` result without a `*` parameter" $ assertRejected isHandedBackWithoutTake $ inModule
+      [ "extern type V;", "fn f (V) -> *V;", "fn f v = v;" ]
+
+   , named "one `*` parameter handed back twice" $ assertRejected isHandedBackWithoutTake $ inModule
+      [ "extern type A;", "extern fn bad (*A) -> (*A, *A);" ]
+
+   , named "`*` result without a `*` parameter in a callback type" $ assertRejected isHandedBackWithoutTake $ inModule
+      [ "extern fn bad (fn(a) -> *a) -> ();" ]
+
+   , named "a taking function where one is expected" $ assertAnalyzes $ inModule
+      [ "extern type V;"
+      , "extern fn apply (fn(*V) -> *V, *V) -> *V;"
+      , "fn taker (*V) -> *V;", "fn taker v = v;"
+      , "fn g (*V) -> *V;", "fn g v = apply taker v;"
+      ]
+
+   , named "a reading function where a taking one is expected" $ assertRejected isTypeError $ inModule
+      [ "extern type V;"
+      , "extern fn apply (fn(*V) -> *V, *V) -> *V;"
+      , "fn reader (V) -> V;", "fn reader v = v;"
+      , "fn g (*V) -> *V;", "fn g v = apply reader v;"
+      ]
+   ]
+
+copyabilityTests :: Test
+copyabilityTests = TestList
+   [ named "@Pod product of @Pod fields" $ assertAnalyzes $ inModule
+      [ "@Pod extern type F;", "@Pod type V = V F F;" ]
+
+   , named "@Pod enum" $ assertAnalyzes $ inModule
+      [ "@Pod type Dir = Up | Down;" ]
+
+   , named "@Pod with a field that is not @Pod" $ assertRejected isInvalidPod $ inModule
+      [ "extern type H;", "@Pod type V = V H;" ]
+
+   , named "generic @Pod" $ assertRejected isInvalidPod $ inModule
+      [ "@Pod type B a = B a;" ]
+
+   , named "@Pod with several constructors and fields" $ assertRejected isInvalidPod $ inModule
+      [ "@Pod extern type F;", "@Pod type S = A F | B;" ]
+
+   , named "@Pod with a field that has no data" $ assertRejected isInvalidPod $ inModule
+      [ "@Pod type M = M;", "@Pod type V = V M;" ]
+
+   , named "@Copyable over a type parameter" $ assertAnalyzes $ inModule
+      [ "@Copyable type Box a = Box a;" ]
+
+   , named "@Copyable with a field that is not copyable" $ assertRejected isNotCopyableField $ inModule
+      [ "extern type H;", "@Copyable type W = W H;" ]
+
+   , named "@Copyable with a type argument that is not copyable" $ assertRejected isNotCopyableField $ inModule
+      [ "extern type H;", "@Copyable type Box a = Box a;", "@Copyable type W = W (Box H);" ]
+
+   , named "@Pod with @Drop" $ assertRejected isPodWithDrop $ inModule
+      [ "extern fn freeH (*H) -> ();", "@Pod @Drop(freeH) extern type H;" ]
+
+   , named "plain @Copyable with @Drop" $ assertRejected isCopyableWithDrop $ inModule
+      [ "type B = B;", "fn freeW (*W) -> ();", "fn freeW w = ();", "@Copyable @Drop(freeW) type W = W B;" ]
+
+   , named "plain @Copyable on an extern type" $ assertRejected isCopyableExtern $ inModule
+      [ "@Copyable extern type H;" ]
+
+   , named "extern type with copy and drop functions" $ assertAnalyzes $ inModule
+      [ "extern fn copyH (H) -> H;", "extern fn freeH (*H) -> ();", "@Drop(freeH) @Copyable(copyH) extern type H;" ]
+
+   , named "copy function with the wrong signature" $ assertRejected isCopyFunctionSignature $ inModule
+      [ "extern fn copyH (H) -> Int;", "@Copyable(copyH) extern type H;" ]
+
+   , named "drop function that reads instead of taking" $ assertRejected isDropFunctionSignature $ inModule
+      [ "extern fn freeH (H) -> ();", "@Drop(freeH) extern type H;" ]
+
+   , named "unknown drop function" $ assertRejected isUnknownOwnershipFunction $ inModule
+      [ "@Drop(nope) extern type H;" ]
+   ]
+
 uniqueVariantTests :: Test
 uniqueVariantTests = TestList
    [ named "a function and its unique variant" $ assertAnalyzes $ inModule
@@ -772,7 +859,10 @@ constraintTests = TestList
 
 intrinsicDeclarationTests :: Test
 intrinsicDeclarationTests = TestList
-   [ named "intrinsic the compiler defines" $ assertAnalyzes $ inModule
+   [ named "the backend implements every intrinsic" $
+      M.keys intrinsicBodies @?= M.keys intrinsicArities
+
+   , named "intrinsic the compiler defines" $ assertAnalyzes $ inModule
       [ "@Intrinsic"
       , "extern fn opSub (Int, Int) -> Int;"
       ]
@@ -875,6 +965,21 @@ isCyclicImport = \case { SEImportError (SECyclicImportError {}) -> True; _ -> Fa
 isMissingModule = \case { SEImportError (SEMissingModule {}) -> True; _ -> False }
 isMissingImports = \case { SEImportError (SEMissingImports {}) -> True; _ -> False }
 isPrivateImports = \case { SEImportError (SEPrivateImports {}) -> True; _ -> False }
+
+isDropFunctionSignature :: SemError -> Bool
+isDropFunctionSignature = \case { SEModifierError (SEDropFunctionSignature {}) -> True; _ -> False }
+
+isHandedBackWithoutTake :: SemError -> Bool
+isHandedBackWithoutTake = \case { SEDefinitionError (SEHandedBackWithoutTake {}) -> True; _ -> False }
+
+isInvalidPod, isNotCopyableField, isPodWithDrop, isCopyableWithDrop, isCopyableExtern, isCopyFunctionSignature, isUnknownOwnershipFunction :: SemError -> Bool
+isInvalidPod = \case { SEModifierError (SEInvalidPod {}) -> True; _ -> False }
+isNotCopyableField = \case { SEModifierError (SENotCopyableField {}) -> True; _ -> False }
+isPodWithDrop = \case { SEModifierError (SEPodWithDrop {}) -> True; _ -> False }
+isCopyableWithDrop = \case { SEModifierError (SECopyableWithDrop {}) -> True; _ -> False }
+isCopyableExtern = \case { SEModifierError (SECopyableExtern {}) -> True; _ -> False }
+isCopyFunctionSignature = \case { SEModifierError (SECopyFunctionSignature {}) -> True; _ -> False }
+isUnknownOwnershipFunction = \case { SEModifierError (SEUnknownOwnershipFunction {}) -> True; _ -> False }
 
 isExportedCtorAlone, isInvalidExportMembers, isHiddenField :: SemError -> Bool
 isExportedCtorAlone = \case { SEImportError (SEExportedCtorAlone {}) -> True; _ -> False }

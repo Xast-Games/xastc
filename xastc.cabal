@@ -46,6 +46,7 @@ library
         Xast.SemAnalyzer.IntBounds,
         Xast.SemAnalyzer.Unify,
         Xast.SemAnalyzer.Exhaustive,
+        Xast.SemAnalyzer.Ownership,
         Xast.SemAnalyzer.TypeUtils,
         Xast.SemAnalyzer.InferPattern,
         Xast.SemAnalyzer.InferExpr,
@@ -69,6 +70,7 @@ library
         Xast.Codegen.C.Types,
         Xast.Codegen.C.Pass,
         Xast.Codegen.C.Intrinsics,
+        Xast.Intrinsics,
         Xast.Codegen.C.Pretty,
 
         Xast.Utils.Compiler,

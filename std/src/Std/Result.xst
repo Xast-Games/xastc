@@ -3,6 +3,7 @@ module Std.Result exports *
 use Std.Bool *
 use Std.Error { error }
 
+@Copyable 
 type Result a e = Ok a | Err e;
 
 fn isOk (Result a e) -> Bool;
