@@ -1,16 +1,19 @@
 {-# LANGUAGE LambdaCase #-}
 module Xast.Lowerer.Expr where
 
-import Xast.AST
-import Xast.Lowerer.Monad (Lowerer, freshKirName, freshKirLocalId)
-import {-# SOURCE #-} Xast.Lowerer.Match (lowerMatchTo)
-import Xast.Lowerer.Types
-import Xast.Lowerer.Mono (monoType, mangleCtor, ctorResultTy, requestIntrinsic, requestFunction)
-import Xast.Utils.Generic (todo__)
-import Data.Maybe (isJust)
 import qualified Data.Map as M
+
 import Control.Monad (when, unless)
 import Control.Monad.State (gets)
+
+import Data.Maybe (isJust)
+
+import Xast.AST
+import {-# SOURCE #-} Xast.Lowerer.Match (lowerMatchTo)
+import Xast.Lowerer.Monad (Lowerer, freshKirName, freshKirLocalId)
+import Xast.Lowerer.Mono (monoType, mangleCtor, ctorResultTy, requestIntrinsic, requestFunction)
+import Xast.Lowerer.Types
+import Xast.Utils.Generic (todo__)
 
 lowerExpr :: M.Map LocalId KirValue -> Expr Desugared -> Lowerer ([KirInstruct], KirValue)
 lowerExpr env expr = case expr of

@@ -4,12 +4,13 @@
 module Xast.SemAnalyzer.IntBounds where
 
 import Control.Monad (forM_, unless)
+import Control.Monad.RWS (asks)
+
 import Xast.AST
 import Xast.Error.Types
 import Xast.SemAnalyzer.Monad
 import Xast.SemAnalyzer.Types
 import Xast.Utils.Compiler (Target (Target32, Target64))
-import Control.Monad.RWS (asks)
 
 -- #### Type checking ####
 

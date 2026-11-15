@@ -2,12 +2,14 @@
 {-# LANGUAGE LambdaCase #-}
 module Xast.Parser.Modifier where
 
-import Text.Megaparsec
 import qualified Data.Set as Set
-import Xast.Parser.Common (Parser, symbol)
+
+import Text.Megaparsec
+
 import Xast.AST (Modifier (..), ModifierTarget (..), ComponentDispatchMode (..), displayModifier, displayTarget, modifierTargets)
-import Xast.Parser.Ident (fnIdent, typeIdent)
+import Xast.Parser.Common (Parser, symbol)
 import Xast.Parser.Expr (stringLiteral)
+import Xast.Parser.Ident (fnIdent, typeIdent)
 
 failAt :: Int -> String -> Parser a
 failAt offset msg = region (const (FancyError offset (Set.singleton (ErrorFail msg)))) (fail msg)

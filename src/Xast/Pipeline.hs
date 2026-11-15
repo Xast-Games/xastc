@@ -1,20 +1,24 @@
 {-# LANGUAGE LambdaCase #-}
 module Xast.Pipeline where
 
-import Control.Exception (IOException, try)
+import qualified Data.Map as M
+import qualified Data.Text.Lazy as TL
+
 import Control.Applicative ((<|>))
+import Control.Exception (IOException, try)
 import Control.Monad (forM_, unless, when)
 import Control.Monad.Except
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import qualified Data.Map as M
-import qualified Data.Text.Lazy as TL
+
 import Data.Maybe (fromMaybe, maybeToList)
+
 import System.Directory (createDirectoryIfMissing, makeAbsolute)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>), takeDirectory)
 import System.IO
 import System.Process
+
 import Text.Pretty.Simple (pShowNoColor)
 
 import Xast.AST
@@ -147,9 +151,10 @@ generate analysis =
 withPrelude :: M.Map Module PackageName -> Program Parsed -> Program Parsed
 withPrelude packageOfModule program =
    let inStd = M.lookup program.moduleDef.name packageOfModule == Just stdPackageName
-   in if inStd
-      then program
-      else program { imports = preludeImport program : program.imports }
+   in if inStd then 
+      program
+   else 
+      program { imports = preludeImport program : program.imports }
 
 -- #### OUTPUT ####
 

@@ -2,14 +2,18 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Xast.Lowerer.Mono where
 
-import Xast.AST
 import qualified Data.Map as M
 import qualified Data.Text as T
-import Data.Text (Text)
-import Text.Read (readMaybe)
+
 import Control.Monad (forM, forM_, unless)
 import Control.Monad.State (gets, modify)
 import Control.Monad.Writer (tell)
+
+import Data.Text (Text)
+
+import Text.Read (readMaybe)
+
+import Xast.AST
 import Xast.Lowerer.Monad (Lowerer)
 import Xast.Lowerer.Types
 import Xast.Utils.Generic ((|>))

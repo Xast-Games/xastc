@@ -2,19 +2,21 @@
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.Declare where
 
-import Control.Monad.State
-import Control.Monad (forM_, unless, when)
-import qualified Data.Set as S
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Text as T
+
+import Control.Monad (forM_, unless, when)
+import Control.Monad.Reader (asks)
+import Control.Monad.State
+
 import Xast.AST
 import Xast.Error.Types
+import Xast.Intrinsics (intrinsicArities)
 import Xast.SemAnalyzer.Monad
+import Xast.SemAnalyzer.TypeUsages (payloadTypes)
 import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Unify (freshConstructorId, freshExternId, freshFunctionId, collectIntrinsics)
-import Xast.SemAnalyzer.TypeUsages (payloadTypes)
-import Control.Monad.Reader (asks)
-import Xast.Intrinsics (intrinsicArities)
 
 -- #### DECLARE STATEMENTS ####
 

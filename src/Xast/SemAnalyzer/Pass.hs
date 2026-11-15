@@ -1,26 +1,26 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.Pass where
 
+import qualified Data.Map as M
+import qualified Data.Set as S
+
+import Control.Monad (forM, forM_)
 import Control.Monad.Except (ExceptT(..))
 import Control.Monad.State
-import Control.Monad (forM, forM_)
-import qualified Data.Set as S
-import qualified Data.Map as M
+
 import Xast.AST
 import Xast.Error.Types
-import Xast.SemAnalyzer.Monad
-import Xast.SemAnalyzer.Types
-import Xast.Utils.Compiler (Target)
-import Xast.SemAnalyzer.ResolveNames (resolveNames)
-import Xast.SemAnalyzer.TypeUsages (resolveTypeUsages)
-import Xast.SemAnalyzer.Ownership (checkOwnership)
 import Xast.SemAnalyzer.Declare (declareStmts)
-import Xast.SemAnalyzer.Imports (importAnalysis)
-import Xast.SemAnalyzer.TypeCheck (typeCheck)
 import Xast.SemAnalyzer.Desugar (desugarProgram)
+import Xast.SemAnalyzer.Imports (importAnalysis)
+import Xast.SemAnalyzer.Monad
+import Xast.SemAnalyzer.Ownership (checkOwnership)
+import Xast.SemAnalyzer.ResolveNames (resolveNames)
+import Xast.SemAnalyzer.TypeCheck (typeCheck)
+import Xast.SemAnalyzer.TypeUsages (resolveTypeUsages)
+import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Unify (zonkProgram, reportAmbiguousConstraints)
+import Xast.Utils.Compiler (Target)
 
 -- #### FULL ANALYSIS ####
 

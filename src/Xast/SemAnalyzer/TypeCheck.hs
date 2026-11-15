@@ -1,23 +1,24 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.TypeCheck where
 
-import Control.Monad.State
-import Control.Monad (unless, zipWithM, forM)
-import Data.Maybe (fromJust)
 import qualified Data.Map as M
+
+import Control.Monad (unless, zipWithM, forM)
+import Control.Monad.State
+
+import Data.Maybe (fromJust)
+
 import Xast.AST
 import Xast.Error.Types
-import Xast.SemAnalyzer.Monad
-import Xast.SemAnalyzer.Types
-import Xast.SemAnalyzer.Query
-import Xast.Utils.Generic ((<--))
-import Xast.SemAnalyzer.IntBounds (checkIntegerBounds)
-import Xast.SemAnalyzer.TypeUtils (compareTypes)
 import Xast.SemAnalyzer.InferExpr (inferType)
 import Xast.SemAnalyzer.InferPattern (inferPattern)
+import Xast.SemAnalyzer.IntBounds (checkIntegerBounds)
+import Xast.SemAnalyzer.Monad
+import Xast.SemAnalyzer.Query
+import Xast.SemAnalyzer.TypeUtils (compareTypes)
+import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Unify (typeOf, withType)
+import Xast.Utils.Generic ((<--))
 
 typeCheck :: Program Resolved -> SemAnalyzer (Program Typed)
 typeCheck (Program moduleDef@(ModuleDef _ moduleName _) imports statements source) = do

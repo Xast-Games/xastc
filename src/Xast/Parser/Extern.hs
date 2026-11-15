@@ -5,10 +5,10 @@ module Xast.Parser.Extern where
 import Text.Megaparsec (many)
 
 import Xast.AST
-import Xast.Parser.Type (markedParams, markedResults)
-import Xast.Parser.Ident
 import Xast.Parser.Common (endOfStmt, Parser, symbol, (<->), withLoc)
+import Xast.Parser.Ident
 import Xast.Parser.Modifier (modifierOn, noRepeatedModifiers)
+import Xast.Parser.Type (markedParams, markedResults)
 
 extern :: Parser Extern
 extern = (ExtFunc <$> externFunc) <-> (ExtType <$> externType)

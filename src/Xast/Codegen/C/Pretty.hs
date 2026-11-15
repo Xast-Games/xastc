@@ -2,16 +2,18 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Xast.Codegen.C.Pretty where
 
+import qualified Xast.Utils.List as L
+
 import Data.List (intercalate)
 import Data.Text (Text)
+
 import Prettyprinter
 
-import qualified Xast.Utils.List as L
-import Xast.Utils.Pretty (bold, cyan)
-import Xast.Lowerer.Types (KirName(..))
-import Xast.Codegen.C.Types
-import Xast.Utils.Generic ((|>))
 import Xast.Codegen.C.Pass (typeDefsFilename)
+import Xast.Codegen.C.Types
+import Xast.Lowerer.Types (KirName(..))
+import Xast.Utils.Generic ((|>))
+import Xast.Utils.Pretty (bold, cyan)
 
 debugPrograms :: [CProgram] -> String
 debugPrograms programs = intercalate "\n\n" $ 

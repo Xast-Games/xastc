@@ -1,11 +1,12 @@
 module Xast.Lowerer.Monad where
 
-import Control.Monad.State (StateT (runStateT), get, put)
 import Control.Monad.Identity (Identity)
+import Control.Monad.State (StateT (runStateT), get, put)
+import Control.Monad.Writer (WriterT (runWriterT))
+
 import Data.Text (pack)
 
 import Xast.Lowerer.Types
-import Control.Monad.Writer (WriterT (runWriterT))
 
 type Lowerer =
    WriterT [KirTypeDef]

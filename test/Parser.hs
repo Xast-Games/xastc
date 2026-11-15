@@ -2,22 +2,26 @@
 {-# LANGUAGE LambdaCase #-}
 module Parser where
 
-import Test.HUnit
-import Xast.Parser.Common (Parser)
-import Text.Megaparsec (runParser, errorBundlePretty, MonadParsec (eof), initialPos)
-import Data.Text (Text)
+import qualified Data.Text as T
+
 import Control.Monad (unless)
 
+import Data.Text (Text)
+
+import Test.HUnit
+
+import Text.Megaparsec (runParser, errorBundlePretty, MonadParsec (eof), initialPos)
+
 import Xast.AST
-import Xast.Parser.Ident
+import Xast.Parser.Common (Parser)
 import Xast.Parser.Expr (pattern', expr)
-import Xast.Parser.Type (type', typeDef)
-import Xast.Parser.Function (func)
 import Xast.Parser.Extern (extern)
+import Xast.Parser.Function (func)
 import Xast.Parser.Headers (importDef, moduleDef)
-import Xast.Parser.System (system)
+import Xast.Parser.Ident
 import Xast.Parser.Program (program)
-import qualified Data.Text as T
+import Xast.Parser.System (system)
+import Xast.Parser.Type (type', typeDef)
 
 tests :: Test
 tests = TestList

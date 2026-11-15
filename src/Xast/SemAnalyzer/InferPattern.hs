@@ -1,19 +1,20 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.InferPattern where
 
-import Control.Monad (zipWithM)
 import qualified Data.Map as M
+
+import Control.Applicative ((<|>))
+import Control.Monad (zipWithM)
+
 import Xast.AST
 import Xast.Error.Types
 import Xast.SemAnalyzer.Monad
-import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Query
-import Control.Applicative ((<|>))
-import Xast.Utils.Generic (unreachableWith)
 import Xast.SemAnalyzer.TypeUtils (ctorType, listType, literalType)
+import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Unify (freshTyVar, freshVarId, unify)
+import Xast.Utils.Generic (unreachableWith)
 
 inferPattern
    :: [Located ImportDef]

@@ -3,16 +3,18 @@
 {-# HLINT ignore "Use uncurry" #-}
 module Xast.SemAnalyzer.Ownership where
 
+import qualified Data.Set as S
+
 import Control.Monad (forM_, unless, when)
 import Control.Monad.State (modify)
-import qualified Data.Set as S
+
 import Xast.AST
 import Xast.Error.Types
-import Xast.SemAnalyzer.Monad
-import Xast.SemAnalyzer.Types
-import Xast.SemAnalyzer.Query (lookupCurrentFunction)
 import Xast.SemAnalyzer.Exhaustive (lookupDeclaringModule, typeSignatureOf)
+import Xast.SemAnalyzer.Monad
+import Xast.SemAnalyzer.Query (lookupCurrentFunction)
 import Xast.SemAnalyzer.TypeUsages (payloadTypes)
+import Xast.SemAnalyzer.Types
 
 -- #### @Copyable, @Pod and @Drop ####
 

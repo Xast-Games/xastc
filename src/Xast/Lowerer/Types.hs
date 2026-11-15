@@ -1,12 +1,14 @@
 {-# LANGUAGE LambdaCase #-}
 module Xast.Lowerer.Types where
 
-import Xast.AST
-import Data.Text (Text)
-import qualified Data.Text as T
 import qualified Data.Map as M
-import Xast.Utils.Generic ((|>))
+import qualified Data.Text as T
+
+import Data.Text (Text)
+
+import Xast.AST
 import Xast.SemAnalyzer.Types (AnalysisResult (..))
+import Xast.Utils.Generic ((|>))
 
 data LowerState = LowerState
    { nameSupply :: Int

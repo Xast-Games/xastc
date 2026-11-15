@@ -3,19 +3,22 @@
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.TypeUtils where
 
-import Control.Monad.Writer (listen, censor)
-import Control.Monad (forM_, unless, when)
-import Data.Foldable (foldl')
 import qualified Data.Map as M
+import qualified Data.Text as T
+
+import Control.Applicative ((<|>))
+import Control.Monad (forM_, unless, when)
+import Control.Monad.Writer (listen, censor)
+
+import Data.Foldable (foldl')
+
 import Xast.AST
 import Xast.Error.Types
 import Xast.SemAnalyzer.Monad
-import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Query (findAnyTypeModule, findTypeModule)
-import Control.Applicative ((<|>))
-import Xast.Utils.Generic (unreachableWith, (|>))
-import qualified Data.Text as T
+import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Unify (bindOrFail, freshTyVar, resolve, substGnr, unify)
+import Xast.Utils.Generic (unreachableWith, (|>))
 
 ctorType :: Location -> SymbolInfo -> SemAnalyzer Type
 ctorType _ (SymbolCtor _ _ (CtorSig ownerIdent generics _ fieldTys)) = do

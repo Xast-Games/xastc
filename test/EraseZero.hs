@@ -2,11 +2,14 @@
 module EraseZero (tests) where
 
 import qualified Data.Set as S
+
 import Data.Text (Text)
+
 import Test.HUnit
+
 import Xast.AST
-import Xast.Lowerer.Types
 import Xast.Lowerer.EraseZero
+import Xast.Lowerer.Types
 
 tests :: Test
 tests = TestList

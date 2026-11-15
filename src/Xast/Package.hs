@@ -1,17 +1,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Xast.Package where
 
+import qualified Data.Map as M
+import qualified Toml
+
+import Control.Applicative ((<|>))
 import Control.Monad (unless, filterM, foldM)
 import Control.Monad.Except
 import Control.Monad.IO.Class (MonadIO (liftIO))
+
 import Data.Either (partitionEithers)
 import Data.Text (pack)
-import Control.Applicative ((<|>))
-import qualified Data.Map as M
+
 import System.Directory (XdgDirectory (XdgData), canonicalizePath, doesFileExist, getXdgDirectory)
 import System.Environment (getExecutablePath, lookupEnv)
 import System.FilePath ((</>), takeDirectory)
-import qualified Toml
 
 import Xast.AST
 import Xast.Config (XastConfig (..), ProjectConfig (..), Dependency (..), xastConfigCodec)

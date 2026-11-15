@@ -2,21 +2,24 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Xast.SemAnalyzer.Exhaustive where
 
-import Control.Monad (forM)
-import Data.Foldable (toList)
-import Data.List (nubBy)
-import Data.Function (on)
-import Data.Maybe (mapMaybe)
-import Data.Text (Text)
 import qualified Data.Set as S
 import qualified Data.Text as T
+import qualified Xast.Utils.List as L
+
+import Control.Monad (forM)
+
+import Data.Foldable (toList)
+import Data.Function (on)
+import Data.List (nubBy)
+import Data.Maybe (mapMaybe)
+import Data.Text (Text)
+
 import Xast.AST
 import Xast.Error.Types
 import Xast.SemAnalyzer.Monad
-import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Query
+import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Unify (resolve)
-import qualified Xast.Utils.List as L
 import Xast.Utils.Generic ((|>))
 
 -- #### Exhaustiveness ####

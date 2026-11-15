@@ -2,16 +2,21 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Xast.Config where
 
-import Data.Text  
-import GHC.Generics (Generic)
-import Toml
-import Xast.AST
-import Text.Megaparsec (runParser, errorBundlePretty)
-import Xast.Parser.Headers (module')
 import qualified Data.Bifunctor as Bifunctor
-import qualified Data.Text as T
 import qualified Data.Map as M
+import qualified Data.Text as T
+
 import Data.Maybe (fromMaybe)
+import Data.Text  
+
+import GHC.Generics (Generic)
+
+import Text.Megaparsec (runParser, errorBundlePretty)
+
+import Toml
+
+import Xast.AST
+import Xast.Parser.Headers (module')
 
 data XastConfig = XastConfig
    { projectConfig   :: ProjectConfig

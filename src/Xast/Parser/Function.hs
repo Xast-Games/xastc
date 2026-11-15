@@ -4,12 +4,12 @@ module Xast.Parser.Function where
 
 import Text.Megaparsec (many)
 
-import Xast.Parser.Type (markedParams, markedResults)
-import Xast.Parser.Ident (fnIdent)
-import Xast.Parser.Expr (expr, atomPattern')
-import Xast.Parser.Common
 import Xast.AST
+import Xast.Parser.Common
+import Xast.Parser.Expr (expr, atomPattern')
+import Xast.Parser.Ident (fnIdent)
 import Xast.Parser.Modifier (modifierOn, noRepeatedModifiers)
+import Xast.Parser.Type (markedParams, markedResults)
 
 func :: Parser (Func Parsed)
 func = do

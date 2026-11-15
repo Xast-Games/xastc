@@ -1,17 +1,18 @@
-{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
 module Xast.Lowerer.Pass where
 
-import Xast.AST
-import Xast.Lowerer.Monad (Lowerer, runLowerer)
-import Xast.Lowerer.Types
-import Xast.Lowerer.Mono (drainTypes, requestTagTypes, substituteTypeParams, mangle, lookupFunctionTemplate)
-import Control.Monad.State (gets, modify)
-import Control.Monad (forM)
 import qualified Data.Map as M
 import qualified Data.Set as S
+
+import Control.Monad (forM)
 import Control.Monad.Identity (Identity(runIdentity))
+import Control.Monad.State (gets, modify)
+
+import Xast.AST
 import Xast.Lowerer.Definition (lowerFunction, lowerSystem)
+import Xast.Lowerer.Monad (Lowerer, runLowerer)
+import Xast.Lowerer.Mono (drainTypes, requestTagTypes, substituteTypeParams, mangle, lookupFunctionTemplate)
+import Xast.Lowerer.Types
 import Xast.SemAnalyzer.Types (AnalysisResult (..))
 
 lowerPrograms :: AnalysisResult -> ([Kira], [KirTypeDef], [KirIntrinsicDef])

@@ -2,16 +2,19 @@
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.Desugar where
 
-import Control.Monad (forM)
-import Data.Maybe (fromMaybe)
-import Data.List (sortOn, groupBy)
-import Xast.AST
-import Xast.SemAnalyzer.Monad
-import Data.Function (on)
 import qualified Data.Text as T
-import Xast.SemAnalyzer.Exhaustive (checkClausesExhaustive)
-import Xast.SemAnalyzer.Unify (freshLocalId)
 import qualified Xast.Utils.List as L
+
+import Control.Monad (forM)
+
+import Data.Function (on)
+import Data.List (sortOn, groupBy)
+import Data.Maybe (fromMaybe)
+
+import Xast.AST
+import Xast.SemAnalyzer.Exhaustive (checkClausesExhaustive)
+import Xast.SemAnalyzer.Monad
+import Xast.SemAnalyzer.Unify (freshLocalId)
 import Xast.Utils.Generic ((|>))
 
 -- #### Desugaring ####

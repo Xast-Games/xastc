@@ -1,17 +1,20 @@
 {-# LANGUAGE LambdaCase #-}
 module Xast.Lowerer.Match where
 
-import Xast.AST
-import Xast.Lowerer.Monad (Lowerer, freshKirName, freshKirLocalId)
-import Xast.Lowerer.Types
-import Xast.Lowerer.DecisionTree
-import Xast.Lowerer.Mono (monoType, mangleCtor, qualifiedCtor)
+import qualified Data.Map as M
+
 import Control.Monad (forM, foldM)
 import Control.Monad.State (gets)
-import Xast.Utils.Generic (todo__)
+
 import Data.Maybe (isJust, isNothing)
-import qualified Data.Map as M
+
+import Xast.AST
+import Xast.Lowerer.DecisionTree
 import Xast.Lowerer.Expr (lowerExpr)
+import Xast.Lowerer.Monad (Lowerer, freshKirName, freshKirLocalId)
+import Xast.Lowerer.Mono (monoType, mangleCtor, qualifiedCtor)
+import Xast.Lowerer.Types
+import Xast.Utils.Generic (todo__)
 
 patTy :: Pattern Desugared -> Type
 patTy = (.ty) . patAnnotation

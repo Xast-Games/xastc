@@ -2,15 +2,18 @@
 {-# LANGUAGE LambdaCase #-}
 module Xast.Lowerer.Definition where
 
-import Xast.AST
-import Xast.Lowerer.Monad (Lowerer, freshKirLocalId)
-import Xast.Lowerer.Types
-import Xast.Lowerer.Mono (monoType)
-import Control.Monad (forM, when)
-import Xast.Utils.Generic (todo__)
-import Data.Maybe (isJust)
 import qualified Data.Map as M
+
+import Control.Monad (forM, when)
+
+import Data.Maybe (isJust)
+
+import Xast.AST
 import Xast.Lowerer.Match (lowerMatchTo, patTy)
+import Xast.Lowerer.Monad (Lowerer, freshKirLocalId)
+import Xast.Lowerer.Mono (monoType)
+import Xast.Lowerer.Types
+import Xast.Utils.Generic (todo__)
 
 lowerSystem :: Module -> SystemImpl Desugared -> Lowerer KirSystem
 lowerSystem module' impl = do

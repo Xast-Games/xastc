@@ -3,9 +3,10 @@
 module Xast.Parser.Headers where
 
 import Text.Megaparsec (sepBy1, between, (<|>), choice, sepEndBy1)
-import Xast.Parser.Ident (typeIdent, fnIdent)
-import Xast.Parser.Common (Parser, symbol, located, withLoc)
+
 import Xast.AST
+import Xast.Parser.Common (Parser, symbol, located, withLoc)
+import Xast.Parser.Ident (typeIdent, fnIdent)
 
 module' :: Parser Module
 module' = Module <$> typeIdent `sepBy1` "."

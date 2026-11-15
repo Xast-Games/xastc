@@ -2,20 +2,24 @@
 {-# LANGUAGE OverloadedStrings #-}
 module SemAnalyzer where
 
+import qualified Data.Map as M
+import qualified Data.Text as T
+
 import Control.Monad (unless)
 import Control.Monad.Except (runExceptT)
+
 import Data.Either (lefts, rights)
 import Data.List (intercalate)
 import Data.Text (Text)
-import qualified Data.Text as T
-import qualified Data.Map as M
+
 import Test.HUnit
-import Xast.Error.Types
+
 import Xast.AST (PackageName, stdPackageName, Program (..), ModuleDef (..), Ident (..))
-import Xast.SemAnalyzer.Declare (hasMisplacedPrime)
-import Xast.Intrinsics (intrinsicArities)
 import Xast.Codegen.C.Intrinsics (intrinsicBodies)
+import Xast.Error.Types
+import Xast.Intrinsics (intrinsicArities)
 import Xast.Parser.Program (parseProgram)
+import Xast.SemAnalyzer.Declare (hasMisplacedPrime)
 import Xast.SemAnalyzer.Pass (fullAnalysis)
 import Xast.SemAnalyzer.Types (AnalysisResult)
 import Xast.Utils.Compiler (Target (Target64))

@@ -6,22 +6,24 @@
 {-# HLINT ignore "Avoid lambda using `infix`" #-}
 module Xast.Codegen.C.Pass where
 
+import qualified Data.Map as M
+import qualified Data.Text as T
+import qualified Xast.Utils.List as L
+
+import Control.Monad (forM)
 import Control.Monad.Identity (Identity(runIdentity))
 import Control.Monad.Reader (MonadReader(ask))
-import Control.Monad (forM)
-import Data.Text (Text)
+
+import Data.Graph (stronglyConnComp, flattenSCCs)
 import Data.Maybe (fromMaybe, isJust, mapMaybe, maybeToList, listToMaybe)
-import qualified Data.Text as T
+import Data.Text (Text)
 
 import Xast.AST
-import Xast.Utils.Generic (todo__, unreachableWith, (|>))
-import Xast.Lowerer.Types
-import Xast.Codegen.C.Types
-import Xast.Codegen.C.Monad (CCodegen, runCodegen, CCodegenEnv (..))
-import qualified Xast.Utils.List as L
-import qualified Data.Map as M
-import Data.Graph (stronglyConnComp, flattenSCCs)
 import Xast.Codegen.C.Intrinsics (IntrinsicBody, IntrinsicSite (..), intrinsicBodies)
+import Xast.Codegen.C.Monad (CCodegen, runCodegen, CCodegenEnv (..))
+import Xast.Codegen.C.Types
+import Xast.Lowerer.Types
+import Xast.Utils.Generic (todo__, unreachableWith, (|>))
 
 codegen 
    :: [Kira] 

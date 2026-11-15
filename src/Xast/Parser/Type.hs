@@ -2,13 +2,14 @@
 {-# LANGUAGE RecordWildCards #-}
 module Xast.Parser.Type where
 
-import Text.Megaparsec (choice, sepBy, between, some, MonadParsec (try), many, sepBy1, sepEndBy, optional)
+import Data.List (foldl1')
 import Data.Maybe (isJust)
 
-import Xast.Parser.Ident
-import Xast.Parser.Common (Parser, symbol, lexeme, endOfStmt, withLoc, located)
+import Text.Megaparsec (choice, sepBy, between, some, MonadParsec (try), many, sepBy1, sepEndBy, optional)
+
 import Xast.AST
-import Data.List (foldl1')
+import Xast.Parser.Common (Parser, symbol, lexeme, endOfStmt, withLoc, located)
+import Xast.Parser.Ident
 import Xast.Parser.Modifier (modifierOn, noRepeatedModifiers)
 import Xast.Utils.Generic ((|>))
 

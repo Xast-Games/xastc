@@ -1,16 +1,19 @@
 {-# LANGUAGE LambdaCase #-}
 module Xast.SemAnalyzer.Query where
 
-import Xast.SemAnalyzer.Types
-import Xast.SemAnalyzer.Monad (SemAnalyzer)
-import Xast.AST
-import Control.Monad.Reader (MonadReader(local), asks)
 import qualified Data.Map as M
-import Control.Monad.State (gets)
 import qualified Data.Set as S
+
+import Control.Applicative ((<|>))
+import Control.Monad.Reader (MonadReader(local), asks)
+import Control.Monad.State (gets)
+
 import Data.List (find)
 import Data.Maybe (fromMaybe)
-import Control.Applicative ((<|>))
+
+import Xast.AST
+import Xast.SemAnalyzer.Monad (SemAnalyzer)
+import Xast.SemAnalyzer.Types
 import Xast.Utils.Generic ((|>))
 
 lookupLocal :: Ident -> SemAnalyzer (Maybe VarInfo)

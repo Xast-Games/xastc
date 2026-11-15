@@ -2,11 +2,12 @@
 module Xast.Parser.Ident where
 
 import Data.Text (Text, pack, unpack)
-import Text.Megaparsec.Char (upperChar, lowerChar, alphaNumChar, char)
-import Text.Megaparsec
 
-import Xast.Parser.Common
+import Text.Megaparsec
+import Text.Megaparsec.Char (upperChar, lowerChar, alphaNumChar, char)
+
 import Xast.AST (Ident(..))
+import Xast.Parser.Common
 
 reserved :: [Text]
 reserved = 

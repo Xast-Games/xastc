@@ -1,12 +1,12 @@
 module Xast.SemAnalyzer.Monad where
    
-import Control.Monad.Writer (WriterT (..), MonadWriter (tell))
+import Control.Monad.Identity
 import Control.Monad.Reader (ReaderT (..))
 import Control.Monad.State (StateT (..))
-import Control.Monad.Identity
+import Control.Monad.Writer (WriterT (..), MonadWriter (tell))
 
-import Xast.SemAnalyzer.Types
 import Xast.Error.Types
+import Xast.SemAnalyzer.Types
 
 type SemAnalyzer = 
    WriterT [SemReport]

@@ -2,16 +2,19 @@
 {-# LANGUAGE RecordWildCards #-}
 module Xast.Parser.Expr where
 
-import Control.Monad.Combinators.Expr
-import Data.Text (Text, pack)
-import Data.List (foldl', foldl1')
-import Text.Megaparsec.Char (char, string, char', string')
-import Text.Megaparsec
 import qualified Text.Megaparsec.Char.Lexer as L
 
+import Control.Monad.Combinators.Expr
+
+import Data.List (foldl', foldl1')
+import Data.Text (Text, pack)
+
+import Text.Megaparsec
+import Text.Megaparsec.Char (char, string, char', string')
+
 import Xast.AST
-import Xast.Parser.Ident (varIdent, typeIdent)
 import Xast.Parser.Common (Parser, lexeme, symbol, located, withLoc)
+import Xast.Parser.Ident (varIdent, typeIdent)
 
 pattern' :: Parser (Pattern Parsed)
 pattern' = choice

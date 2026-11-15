@@ -1,13 +1,15 @@
 {-# LANGUAGE LambdaCase #-}
 module Xast.Lowerer.EraseZero where
 
-import Data.List (mapAccumL, partition)
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Xast.Utils.List as L
+
+import Data.List (mapAccumL, partition)
+
+import Xast.AST
 import Xast.Lowerer.Types
 import Xast.Utils.Generic ((|>), unreachableWith)
-import Xast.AST
 
 data EraseResult = EraseResult
    { programs  :: [Kira]

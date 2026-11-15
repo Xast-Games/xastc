@@ -1,6 +1,7 @@
 module Xast.Codegen.C.Types where
 
 import Data.Text (Text)
+
 import Xast.Lowerer.Types (KirName)
 
 type EcsTag = KirName

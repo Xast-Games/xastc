@@ -1,9 +1,10 @@
 module Main (main) where
    
-import Test.HUnit (runTestTT, Test (TestList, TestLabel), Counts (errors, failures))
+import qualified EraseZero
 import qualified Parser
 import qualified SemAnalyzer
-import qualified EraseZero
+
+import Test.HUnit (runTestTT, Test (TestList, TestLabel), Counts (errors, failures))
 
 main :: IO ()
 main = do

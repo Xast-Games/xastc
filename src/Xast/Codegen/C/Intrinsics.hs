@@ -3,6 +3,7 @@
 module Xast.Codegen.C.Intrinsics where
 
 import qualified Data.Map as M
+
 import Data.Text (Text)
 
 import Xast.AST

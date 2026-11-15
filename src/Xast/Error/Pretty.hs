@@ -1,19 +1,24 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 module Xast.Error.Pretty where
 
+import qualified Xast.Utils.List as L
+
 import Control.Monad (forM_, unless)
+
 import Data.List (intercalate)
 import Data.Text (Text, unpack, pack)
 import Data.Void (Void)
+
 import Error.Diagnose
 import Error.Diagnose.Compat.Megaparsec (HasHints (hints), errorDiagnosticFromBundle)
+
 import Text.Megaparsec
+
 import Toml (prettyTomlDecodeError)
 
-import Xast.Error.Types
 import Xast.AST
+import Xast.Error.Types
 import Xast.Utils.Pretty 
-import qualified Xast.Utils.List as L
 
 instance HasHints Void String where
    hints :: Void -> [Note String]

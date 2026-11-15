@@ -1,11 +1,13 @@
 module Xast.Lowerer.DecisionTree where
 
+import qualified Xast.Utils.List as L
+
+import Data.List (findIndex, nub)
+import Data.Maybe (catMaybes, isJust, mapMaybe, fromJust)
+
 import Xast.AST (LocalId, Type, FieldName)
 import Xast.Lowerer.Types (KirTag)
 import Xast.Utils.Generic ((|>), unreachableWith)
-import Data.Maybe (catMaybes, isJust, mapMaybe, fromJust)
-import Data.List (findIndex, nub)
-import qualified Xast.Utils.List as L
 
 data Occ = Occ
    { root :: Int

@@ -2,19 +2,21 @@
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.Unify where
 
-import Control.Monad.State
-import Control.Monad.Reader (asks)
-import Control.Monad (zipWithM_, forM, forM_, unless, filterM)
-import Data.List (nubBy)
-import Data.Function (on)
-import qualified Data.Set as S
 import qualified Data.Map as M
+import qualified Data.Set as S
 
-import Xast.Utils.Generic ((|>))
+import Control.Monad (zipWithM_, forM, forM_, unless, filterM)
+import Control.Monad.Reader (asks)
+import Control.Monad.State
+
+import Data.Function (on)
+import Data.List (nubBy)
+
 import Xast.AST
 import Xast.Error.Types
 import Xast.SemAnalyzer.Monad
 import Xast.SemAnalyzer.Types
+import Xast.Utils.Generic ((|>))
 
 withType :: WithType -> Type
 withType (WithEvent lt) = lt.node

@@ -3,17 +3,18 @@ module Xast.Parser.Program where
 
 import Data.Bifunctor (Bifunctor(first))
 import Data.Text (Text)
+
 import Text.Megaparsec (MonadParsec (lookAhead, eof), many, (<|>), runParser)
 
-import Xast.Parser.Type (typeDef)
-import Xast.Parser.Function (func)
-import Xast.Parser.Common (Parser, sc)
-import Xast.Parser.Headers (moduleDef, importDef)
-import Xast.Parser.System (system)
-import Xast.Parser.Extern
-import Xast.Parser.Modifier (modifier)
-import Xast.Error.Types (XastError (XastParseError))
 import Xast.AST
+import Xast.Error.Types (XastError (XastParseError))
+import Xast.Parser.Common (Parser, sc)
+import Xast.Parser.Extern
+import Xast.Parser.Function (func)
+import Xast.Parser.Headers (moduleDef, importDef)
+import Xast.Parser.Modifier (modifier)
+import Xast.Parser.System (system)
+import Xast.Parser.Type (typeDef)
 
 parseProgram :: String -> Text -> Either XastError (Program Parsed)
 parseProgram filename code = 

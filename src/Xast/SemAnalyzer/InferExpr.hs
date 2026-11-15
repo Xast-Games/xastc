@@ -1,19 +1,22 @@
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.InferExpr where
 
-import Control.Monad (forM_, zipWithM, forM, unless)
-import Data.Maybe (fromMaybe)
-import qualified Data.Set as S
 import qualified Data.Map as M
+import qualified Data.Set as S
+
+import Control.Applicative ((<|>))
+import Control.Monad (forM_, zipWithM, forM, unless)
+
+import Data.Maybe (fromMaybe)
+
 import Xast.AST
 import Xast.Error.Types
-import Xast.SemAnalyzer.Monad
-import Xast.SemAnalyzer.Types
-import Xast.SemAnalyzer.Query
-import Control.Applicative ((<|>))
-import Xast.SemAnalyzer.TypeUtils (applyTypes, boolType, compareListElems, compareThenElse, compareTypes, ctorType, genericList, listType, literalType)
 import Xast.SemAnalyzer.Exhaustive (checkMatchExhaustive, lookupDeclaringModule, patOf, typeHead)
 import Xast.SemAnalyzer.InferPattern (inferPattern)
+import Xast.SemAnalyzer.Monad
+import Xast.SemAnalyzer.Query
+import Xast.SemAnalyzer.TypeUtils (applyTypes, boolType, compareListElems, compareThenElse, compareTypes, ctorType, genericList, listType, literalType)
+import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Unify (freshTyVar, generalize, instantiate, resolve, substTyVars, typeOf, unify)
 
 inferType

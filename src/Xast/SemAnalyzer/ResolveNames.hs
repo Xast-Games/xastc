@@ -2,18 +2,21 @@
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.ResolveNames where
 
-import Control.Monad.State
-import Control.Monad (forM_, forM)
 import qualified Data.Map as M
+import qualified Xast.Utils.List as L
+
+import Control.Applicative ((<|>))
+import Control.Monad (forM_, forM)
+import Control.Monad.State
+
+import Text.Megaparsec (SourcePos(sourceName))
+
 import Xast.AST
 import Xast.Error.Types
 import Xast.SemAnalyzer.Monad
-import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Query
-import Text.Megaparsec (SourcePos(sourceName))
-import Control.Applicative ((<|>))
+import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Unify (freshLocalScope)
-import qualified Xast.Utils.List as L
 
 -- #### RESOLVE NAMES ####
 resolveNames :: Program Parsed -> SemAnalyzer (Program Resolved)

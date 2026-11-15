@@ -1,12 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Xast.Parser.Common where
 
+import qualified Text.Megaparsec.Char.Lexer as L
+
 import Control.Monad (void)
+
 import Data.Text (Text)
 import Data.Void (Void)
+
 import Text.Megaparsec
 import Text.Megaparsec.Char (space1)
-import qualified Text.Megaparsec.Char.Lexer as L
 
 import Xast.AST (Located(Located), Location(..))
 

@@ -1,16 +1,17 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
 module Xast.SemAnalyzer.TypeUsages where
 
-import Control.Monad.State
+import qualified Data.Map as M
+
 import Control.Monad (forM, forM_)
+import Control.Monad.State
+
 import Xast.AST
 import Xast.Error.Types
 import Xast.SemAnalyzer.Monad
-import Xast.SemAnalyzer.Types
 import Xast.SemAnalyzer.Query
-import qualified Data.Map as M
+import Xast.SemAnalyzer.Types
 import Xast.Utils.Generic ((|>))
 
 -- #### RESOLVE TYPE USAGES ####

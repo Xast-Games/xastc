@@ -3,9 +3,12 @@
 module Xast.AST where
 
 import Data.List (intercalate)
-import GHC.Generics (Generic)
 import Data.Text (Text, unpack, pack)
+
+import GHC.Generics (Generic)
+
 import Text.Megaparsec (SourcePos)
+
 import Xast.Utils.Generic ((|>))
 
 data Located a = Located

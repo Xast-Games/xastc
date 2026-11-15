@@ -2,22 +2,24 @@
 {-# LANGUAGE LambdaCase #-}
 module Xast.SemAnalyzer.Imports where
 
-import Control.Monad.State
-import Control.Monad (forM_, unless, when)
-import Data.Maybe (fromJust, fromMaybe)
-import Data.List (sortBy)
-import qualified Data.Set as S
 import qualified Data.Map as M
+import qualified Data.Set as S
+import qualified Xast.Utils.List as L
+
+import Control.Monad (forM_, unless, when)
+import Control.Monad.State
+
+import Data.Graph (stronglyConnComp, flattenSCCs)
+import Data.List (sortBy)
+import Data.Maybe (mapMaybe, listToMaybe, fromJust, fromMaybe)
+
 import Xast.AST
 import Xast.Error.Types
-import Xast.Utils.List (allEqual, pairs)
 import Xast.SemAnalyzer.Monad
+import Xast.SemAnalyzer.Query (exportOrigin, importBringsIn, isTypeSymbol)
 import Xast.SemAnalyzer.Types
 import Xast.Utils.Generic ((|>))
-import qualified Xast.Utils.List as L
-import Xast.SemAnalyzer.Query (exportOrigin, importBringsIn, isTypeSymbol)
-import Data.Graph (stronglyConnComp, flattenSCCs)
-import Data.Maybe (mapMaybe, listToMaybe)
+import Xast.Utils.List (allEqual, pairs)
 
 -- #### RESOLVE IMPORTS ####
 

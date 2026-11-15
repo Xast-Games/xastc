@@ -2,10 +2,13 @@ module Main where
 
 import Data.Text (pack, unpack)
 import Data.Version (showVersion)
+
 import Options.Applicative
-import System.Exit (exitWith)
 
 import Paths_xastc (version)
+
+import System.Exit (exitWith)
+
 import Xast.AST (Module)
 import Xast.Config (parseModule)
 import Xast.Pipeline

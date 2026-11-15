@@ -18,9 +18,11 @@ module Xast.Html
    , typedAstPage
    ) where
 
+import qualified Data.Text as T
+
 import Data.List (sortOn)
 import Data.Text (Text)
-import qualified Data.Text as T
+
 import Xast.AST
 
 data Html

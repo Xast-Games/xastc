@@ -2,10 +2,12 @@ module Xast.Error.Types where
 
 import Data.Text (Text)
 import Data.Void (Void)
+
 import Text.Megaparsec (ParseErrorBundle)
 
-import Xast.AST
 import Toml (TomlDecodeError)
+
+import Xast.AST
 
 data SemReport
    = SemWarning SemWarning
