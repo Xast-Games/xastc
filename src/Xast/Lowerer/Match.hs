@@ -16,14 +16,14 @@ import Xast.Lowerer.Mono (monoType, mangleCtor, qualifiedCtor)
 import Xast.Lowerer.Types
 import Xast.Utils.Generic (todo__)
 
-patTy :: Pattern Desugared -> Type
+patTy :: Pattern LivenessAnalyzed -> Type
 patTy = (.ty) . patAnnotation
 
 lowerMatchTo
    :: M.Map LocalId KirValue
    -> Type
    -> KirDest
-   -> Match Desugared
+   -> Match LivenessAnalyzed
    -> Lowerer [KirInstruct]
 lowerMatchTo env resultType dest match = do
    let (rootExprs, tupled) = case match.baseExpr of
@@ -57,7 +57,7 @@ lowerMatchTo env resultType dest match = do
    treeInstrs <- lowerTreeInto context initialState dest tree
    pure (scrutInstrs ++ treeInstrs)
 
-rowPatterns :: Bool -> Int -> Pattern Desugared -> [Pattern Desugared]
+rowPatterns :: Bool -> Int -> Pattern LivenessAnalyzed -> [Pattern LivenessAnalyzed]
 rowPatterns tupled columnCount = \case
    PatTuple _ subPatterns | tupled, length subPatterns == columnCount -> subPatterns
    PatTuple _ [single] | columnCount == 1 -> [single]
@@ -68,7 +68,7 @@ rowPatterns tupled columnCount = \case
 toPat
    :: M.Map ConstructorId Int       -- ^ constructor id -> number of constructors of its type
    -> M.Map QualifiedIdent [Ident]  -- ^ constructor -> its declared field names
-   -> Pattern Desugared
+   -> Pattern LivenessAnalyzed
    -> Pat
 toPat spans fieldNamesOfCtor = \case
    PatVar info ident ->
@@ -97,7 +97,7 @@ toPat spans fieldNamesOfCtor = \case
 data DTCtx = DTCtx
    { ctxEnv    :: M.Map LocalId KirValue
    , ctxTy     :: Type
-   , ctxBodies :: [Expr Desugared]
+   , ctxBodies :: [Expr LivenessAnalyzed]
    }
 
 data OccState = OccState

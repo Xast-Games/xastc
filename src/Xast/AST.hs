@@ -142,7 +142,7 @@ type SystemName = Ident
 newtype Parsed = ParsedInfo
    { location :: Location
    }
-   deriving (Show)
+   deriving Show
 
 instance Eq Parsed where
    (==) :: Parsed -> Parsed -> Bool
@@ -152,7 +152,7 @@ data Resolved = ResolvedInfo
    { location :: Location
    , res      :: Maybe Resolution
    }
-   deriving (Show)
+   deriving Show
 
 instance Eq Resolved where
    (==) :: Resolved -> Resolved -> Bool
@@ -163,20 +163,40 @@ data Typed = TypedInfo
    , ty       :: Type
    , res      :: Maybe Resolution
    }
-   deriving (Show)
+   deriving Show
 
 instance Eq Typed where
    (==) :: Typed -> Typed -> Bool
    a == b = a.ty == b.ty && a.res == b.res
 
 data Desugared = DesugaredInfo
-   { ty  :: Type
+   { location :: Location
+   , ty  :: Type
    , res :: Maybe Resolution
    }
-   deriving (Eq, Show)
+   deriving Show
 
-desugaredAnn :: Typed -> Desugared
-desugaredAnn ti = DesugaredInfo ti.ty ti.res
+instance Eq Desugared where
+   (==) :: Desugared -> Desugared -> Bool
+   a == b = a.ty == b.ty && a.res == b.res
+
+data LivenessAnalyzed = LivenessInfo
+   { location :: Location
+   , ty       :: Type
+   , res      :: Maybe Resolution
+   , decision :: Maybe OwnershipDecision
+   }
+   deriving Show
+
+instance Eq LivenessAnalyzed where
+   (==) :: LivenessAnalyzed -> LivenessAnalyzed -> Bool
+   a == b = a.ty == b.ty && a.res == b.res
+
+desugaredInfo :: Typed -> Desugared
+desugaredInfo ti = DesugaredInfo ti.location ti.ty ti.res
+
+livenessInfo :: Maybe OwnershipDecision -> Desugared -> LivenessAnalyzed
+livenessInfo decision di = LivenessInfo di.location di.ty di.res decision
 
 newtype LocalId = LocalId { inner :: Int }
    deriving (Eq, Ord, Show)
@@ -201,7 +221,7 @@ data Expr a
    | ExpList { info :: a, elements :: [Expr a] }                     -- [a, 12, b, c]
    | ExpLit { info :: a, literal :: Literal }                        -- "abc", 12, ()
    | ExpLambda { info :: a, lambda :: Lambda a }                     -- .\x y -> x + y
-   | ExpApp { info :: a, function :: Expr a, argument :: Expr a }    -- Just 12, func a b
+   | ExpApp { info :: a, operand :: Expr a, applicant :: Expr a }    -- Just 12, func a b
    | ExpLetIn { info :: a, letIn :: LetIn a }                        -- let a = 1 and let b = 2 in ...
    | ExpMatch { info :: a, match :: Match a }                        -- match EXPR of
    | ExpIfThen { info :: a, ifThenElse :: IfThenElse a }             -- if ... then ... else ...
@@ -209,6 +229,27 @@ data Expr a
    | ExpRecUpdate { info :: a, update :: RecUpdate a }               -- value { field = 12, field2 = True }
    | ExpVarGetter { info :: a, base :: Expr a, getter :: Getter }    -- var.x, tuple.0
    deriving (Eq, Show, Functor, Foldable, Traversable)
+
+-- | The head of an application and its arguments: @f a b@ is @(f, [a, b])@.
+applicationSpine :: Expr a -> (Expr a, [Expr a])
+applicationSpine expr = go expr []
+   where 
+      go :: Expr a -> [Expr a] -> (Expr a, [Expr a])
+      go e accumulator = case e of
+         ExpApp _ operand applicant -> 
+            go operand (applicant : accumulator)
+         callee -> 
+            (callee, accumulator)
+
+applicationSpineInfos :: Expr a -> (Expr a, [(a, Expr a)])
+applicationSpineInfos expr = go expr []
+   where
+      go :: Expr a -> [(a, Expr a)] -> (Expr a, [(a, Expr a)])
+      go e accumulator = case e of
+         ExpApp { info, operand, applicant } -> 
+            go operand ((info, applicant) : accumulator)
+         callee -> 
+            (callee, accumulator)
 
 data Getter
    = GetField FieldName
@@ -741,3 +782,35 @@ typenameArg ty
       needsParens (TyApp _ _) = True
       needsParens (TyFn {})   = True
       needsParens _           = False
+
+-- | What happens at a use that creates a second name for a value.
+data OwnershipDecision
+   = Move
+   | NoMove
+      { kind      :: SecondNameKind
+      , cause     :: NoMoveCause
+      , valueType :: Type    -- ^ picks the clone: a bit copy for @Pod, the @Copyable(fn) function, or field by field
+      , outcome   :: NoMoveOutcome
+      }
+   deriving (Eq, Show)
+
+data NoMoveOutcome
+   = Clone
+      { inLoop :: Bool -- ^ for @--report-costs@
+      }
+   | Reject
+   deriving (Eq, Show)
+
+data SecondNameKind
+   = Rebound         -- ^ @let b = a@
+   | Returned        -- ^ the value is returned, or a result holds it
+   | Stored          -- ^ put into a record, list or other value
+   | Captured        -- ^ captured by a lambda
+   | PassedToTake    -- ^ passed to a @*@ parameter
+   | FieldHandedOn   -- ^ a field is bound or handed on, @let g = s.items@
+   deriving (Eq, Show)
+
+data NoMoveCause
+   = OldNameLive { laterUse :: Location }  -- ^ the old name is used again here, the second marker of the error
+   | NotOwned                              -- ^ the name is a bare parameter, so the function owns nothing
+   deriving (Eq, Show)

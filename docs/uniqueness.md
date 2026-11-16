@@ -324,7 +324,7 @@ fn modifyAt (Int, *Vec (Vec a), fn(*Vec a) -> *Vec a) -> *Vec (Vec a);
 
 **Problem.** A name that appears in both arms of an `if` is used twice in the text but once on each path.
 
-**Solution.** Liveness is computed backward, per path, and per field path. For each instruction, a name used here that is not needed afterwards is at its last use (a move); otherwise it is a second name. A `match` or `if` analyses each arm separately, starting from the set needed after the whole expression; what is needed before it is the scrutinee plus the union of the arms. Using a name twice in one instruction (`f v v`) makes the second use a second name. Loops need a fixpoint (P8).
+**Solution.** Liveness is computed backward, per path, and per field path. For each instruction, a name used here that is not needed afterwards is at its last use (a move); otherwise it is a second name. A `match` or `if` analyzes each arm separately, starting from the set needed after the whole expression; what is needed before it is the scrutinee plus the union of the arms. Using a name twice in one instruction (`f v v`) makes the second use a second name. Loops need a fixpoint (P8).
 
 ```haskell
 fn g (*Vec Int, Bool) -> Vec Int;

@@ -64,7 +64,7 @@ data DumpOptions = DumpOptions
 
 -- #### COMMANDS ####
 
--- | @xastc check@: parses and analyses the project.
+-- | @xastc check@: parses and analyzes the project.
 runCheck :: ProjectOptions -> IO ExitCode
 runCheck options = report "Check" $ do
    analysis <- analyzeProject options
@@ -134,7 +134,7 @@ analyzeProject options = do
 ignoreSavedFile :: FilePath -> String -> IO ()
 ignoreSavedFile _ _ = pure ()
 
--- | What the backend produces from an analysed project.
+-- | What the backend produces from an analyzed project.
 data Generated = Generated
    { kira     :: [Kira]
    , programs :: [CProgram]

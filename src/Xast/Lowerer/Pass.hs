@@ -46,8 +46,8 @@ recordInstance :: Module -> KirFunction -> Lowerer ()
 recordInstance module' function = modify $ \state -> state
    { loweredInsts = state.loweredInsts ++ [(module', function)] }
 
-substituteInfo :: M.Map Type Type -> Desugared -> Desugared
-substituteInfo typeParams info = DesugaredInfo
+substituteInfo :: M.Map Type Type -> LivenessAnalyzed -> LivenessAnalyzed
+substituteInfo typeParams info = LivenessInfo
    { ty  = substituteTypeParams typeParams info.ty
    , res = info.res
    }
@@ -59,7 +59,7 @@ addInstances instances kira =
    let own = [ function | (module', function) <- instances, module' == kira.moduleName ]
    in kira { functions = kira.functions ++ own }
 
-lowerProgram :: Program Desugared -> Lowerer Kira
+lowerProgram :: Program LivenessAnalyzed -> Lowerer Kira
 lowerProgram program = do
    let systemImpls = [systemImpl | StmtSystem (SysImpl systemImpl) <- program.stmts]
    let genericFunctions = genericFunctionNames program
@@ -81,7 +81,7 @@ lowerProgram program = do
 
 -- | Functions with a generic, @number@ or @concatenative@ in their signature.
 --   Skipped until function monomorphization lowers them per use.
-genericFunctionNames :: Program Desugared -> S.Set FunctionName
+genericFunctionNames :: Program LivenessAnalyzed -> S.Set FunctionName
 genericFunctionNames program = S.fromList
    [ funcDef.name
    | StmtFunc (FnDef funcDef) <- program.stmts

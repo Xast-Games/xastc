@@ -11,7 +11,7 @@ import Xast.Utils.Compiler (Target)
 
 data AnalysisResult = AnalysisResult
    { warningsCount :: Int
-   , progs         :: [Program Desugared]
+   , progs         :: [Program LivenessAnalyzed]
    , ctorSpans     :: M.Map ConstructorId Int
    , intrinsics    :: M.Map ExternId IntrinsicDecl
    , functionModules :: M.Map FunctionId Module  -- ^ declaring module of every function

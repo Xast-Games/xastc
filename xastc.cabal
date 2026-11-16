@@ -47,6 +47,7 @@ library
         Xast.SemAnalyzer.Unify,
         Xast.SemAnalyzer.Exhaustive,
         Xast.SemAnalyzer.Ownership,
+        Xast.SemAnalyzer.OwnershipTable,
         Xast.SemAnalyzer.TypeUtils,
         Xast.SemAnalyzer.InferPattern,
         Xast.SemAnalyzer.InferExpr,
@@ -55,6 +56,7 @@ library
         Xast.SemAnalyzer.Monad,
         Xast.SemAnalyzer.Query,
         Xast.SemAnalyzer.Types,
+        Xast.SemAnalyzer.Liveness,
 
         Xast.Lowerer.Monad,
         Xast.Lowerer.Types,

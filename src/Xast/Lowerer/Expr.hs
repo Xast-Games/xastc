@@ -15,7 +15,7 @@ import Xast.Lowerer.Mono (monoType, mangleCtor, ctorResultTy, requestIntrinsic, 
 import Xast.Lowerer.Types
 import Xast.Utils.Generic (todo__)
 
-lowerExpr :: M.Map LocalId KirValue -> Expr Desugared -> Lowerer ([KirInstruct], KirValue)
+lowerExpr :: M.Map LocalId KirValue -> Expr LivenessAnalyzed -> Lowerer ([KirInstruct], KirValue)
 lowerExpr env expr = case expr of
    ExpLit _ lit -> pure ([], KirConst (TagLit lit))
 
@@ -35,7 +35,7 @@ lowerExpr env expr = case expr of
          _ -> todo__ ("only resolved local variable references are supported in the lowerer yet, got " ++ show ident)
 
    ExpApp info _ _ -> do
-      let (callee, args) = applicationSpine expr []
+      let (callee, args) = applicationSpine expr
       lowered <- mapM (lowerExpr env) args
       let argInstrs = concatMap fst lowered
       let argValues = map snd lowered
@@ -62,16 +62,10 @@ lowerExpr env expr = case expr of
       "this expression form is not supported by the lowerer yet:\n" ++
       show unsupportedExpr
 
--- | The head of an application and its arguments: @f a b@ is @(f, [a, b])@.
-applicationSpine :: Expr Desugared -> [Expr Desugared] -> (Expr Desugared, [Expr Desugared])
-applicationSpine expr accumulator = case expr of
-   ExpApp _ func arg -> applicationSpine func (arg : accumulator)
-   callee            -> (callee, accumulator)
-
 -- | A constructor applied to all its fields.
 lowerConstruct
    :: Type          -- ^ the monomorphic type built
-   -> Desugared     -- ^ of the constructor
+   -> LivenessAnalyzed     -- ^ of the constructor
    -> CtorName
    -> [KirValue]    -- ^ the fields
    -> Lowerer ([KirInstruct], KirValue)
@@ -92,7 +86,7 @@ lowerConstruct builtType info name fields = do
 -- | A function call, or an intrinsic call.
 lowerCall
    :: Type          -- ^ the monomorphic result type
-   -> Desugared     -- ^ of the callee
+   -> LivenessAnalyzed     -- ^ of the callee
    -> FunctionName
    -> [KirValue]    -- ^ the arguments
    -> Lowerer ([KirInstruct], KirValue)
@@ -144,7 +138,7 @@ isFunctionType _         = False
 
 lowerLetBindings
    :: M.Map LocalId KirValue
-   -> [Let Desugared]
+   -> [Let LivenessAnalyzed]
    -> Lowerer ([KirInstruct], M.Map LocalId KirValue)
 lowerLetBindings env [] = pure ([], env)
 lowerLetBindings env (Let pat value : rest) = do

@@ -9,5 +9,5 @@ lowerMatchTo
    :: M.Map LocalId KirValue
    -> Type
    -> KirDest
-   -> Match Desugared
+   -> Match LivenessAnalyzed
    -> Lowerer [KirInstruct]

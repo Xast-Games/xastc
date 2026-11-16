@@ -30,7 +30,7 @@ data LowerState = LowerState
 data FunctionTemplate = FunctionTemplate
    { moduleName :: Module
    , signature  :: FuncDef
-   , impl       :: FuncImpl Desugared
+   , impl       :: FuncImpl LivenessAnalyzed
    }
 
 -- | A generic function instance waiting to be lowered.
@@ -65,7 +65,7 @@ newLowerState analysis = LowerState
       | p <- analysis.progs, StmtTypeDef td <- p.stmts, ctor <- td.ctors ]
    }
 
-functionTemplates :: [Program Desugared] -> M.Map QualifiedIdent FunctionTemplate
+functionTemplates :: [Program LivenessAnalyzed] -> M.Map QualifiedIdent FunctionTemplate
 functionTemplates programs = M.fromList
    [ (declaredIn program funcDef.name, functionTemplate program funcDef funcImpl)
    | program <- programs
@@ -74,7 +74,7 @@ functionTemplates programs = M.fromList
    , funcImpl.name == funcDef.name
    ]
 
-functionTemplate :: Program Desugared -> FuncDef -> FuncImpl Desugared -> FunctionTemplate
+functionTemplate :: Program LivenessAnalyzed -> FuncDef -> FuncImpl LivenessAnalyzed -> FunctionTemplate
 functionTemplate program funcDef funcImpl = FunctionTemplate
    { moduleName = program.moduleDef.name
    , signature  = funcDef
@@ -82,7 +82,7 @@ functionTemplate program funcDef funcImpl = FunctionTemplate
    }
 
 -- | A name declared at the top level of a program.
-declaredIn :: Program Desugared -> Ident -> QualifiedIdent
+declaredIn :: Program LivenessAnalyzed -> Ident -> QualifiedIdent
 declaredIn program name = QualifiedIdent { moduleName = Just program.moduleDef.name, name = name }
 
 -- KIRA = Khast Intermediate RepresentAtion

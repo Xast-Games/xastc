@@ -158,7 +158,7 @@ checkCopyableFields typeDef =
 isCopyableType :: Type -> SemAnalyzer Bool
 isCopyableType = \case
    TyTuple elements -> allM isCopyableType elements
-   TyFn {}         -> pure True  -- a function that captures nothing
+   TyFn {}          -> pure True  -- a function that captures nothing
    type' -> case typeHeadAndArgs type' of
       Just (typeName, args) -> do
          copyable <- (/= NotCopyable) <$> copyabilityOf typeName

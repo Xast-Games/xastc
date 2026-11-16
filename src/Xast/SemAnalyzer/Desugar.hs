@@ -21,7 +21,7 @@ import Xast.Utils.Generic ((|>))
 
 desugarProgram :: Program Typed -> SemAnalyzer (Program Desugared)
 desugarProgram program = do
-   let nonImplStmts = [desugaredAnn <$> stmt | stmt <- program.stmts, isNotImpl stmt]
+   let nonImplStmts = [desugaredInfo <$> stmt | stmt <- program.stmts, isNotImpl stmt]
 
    -- Functions
    let functionImpls = [funcImpl | StmtFunc (FnImpl funcImpl) <- program.stmts]
@@ -58,8 +58,8 @@ desugarFn group = do
    -- Tuple patterns and bodies
    let tupleAnn = DesugaredInfo {res = Nothing, ty = TyTuple argTypes}
    let patBodies = L.forEach group $ \impl ->
-         ( PatTuple tupleAnn $ map (fmap desugaredAnn) impl.args
-         , fmap desugaredAnn impl.body
+         ( PatTuple tupleAnn $ map (fmap desugaredInfo) impl.args
+         , fmap desugaredInfo impl.body
          )
 
    -- Define args names
@@ -102,8 +102,8 @@ desugarSys group = do
    -- Tuple patterns and bodies
    let tupleAnn = DesugaredInfo {res = Nothing, ty = TyTuple argTypes}
    let patBodies = L.forEach group $ \impl ->
-         ( PatTuple tupleAnn $ map (fmap desugaredAnn) (flattenClause impl)
-         , fmap desugaredAnn impl.body
+         ( PatTuple tupleAnn $ map (fmap desugaredInfo) (flattenClause impl)
+         , fmap desugaredInfo impl.body
          )
 
    -- Define param names, one per flattened position

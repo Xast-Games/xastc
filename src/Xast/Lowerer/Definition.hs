@@ -15,7 +15,7 @@ import Xast.Lowerer.Mono (monoType)
 import Xast.Lowerer.Types
 import Xast.Utils.Generic (todo__)
 
-lowerSystem :: Module -> SystemImpl Desugared -> Lowerer KirSystem
+lowerSystem :: Module -> SystemImpl LivenessAnalyzed -> Lowerer KirSystem
 lowerSystem module' impl = do
    when (isJust impl.with) $
       todo__ "`with` entities are not supported yet"
@@ -54,7 +54,7 @@ lowerSystem module' impl = do
 
    return KirSystem {..}
 
-lowerFunction :: KirName -> FuncImpl Desugared -> Lowerer KirFunction
+lowerFunction :: KirName -> FuncImpl LivenessAnalyzed -> Lowerer KirFunction
 lowerFunction name impl = do
    match <- case impl.body of
       ExpMatch _ matchExpr -> pure matchExpr

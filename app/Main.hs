@@ -38,7 +38,7 @@ versionOption = simpleVersioner ("xastc " <> showVersion version)
 
 commands :: Parser Command
 commands = hsubparser
-   (  command "check" (info (Check <$> projectOptions) (progDesc "Parse and analyse the project"))
+   (  command "check" (info (Check <$> projectOptions) (progDesc "Parse and analyze the project"))
    <> command "build" (info (Build <$> buildOptions) (progDesc "Generate C and check it with a C compiler"))
    <> command "dump"  (info (Dump <$> dumpOptions) (progDesc "Print one stage of the compiler"))
    )

@@ -13,6 +13,7 @@ import Xast.Error.Types
 import Xast.SemAnalyzer.Declare (declareStmts)
 import Xast.SemAnalyzer.Desugar (desugarProgram)
 import Xast.SemAnalyzer.Imports (importAnalysis)
+import Xast.SemAnalyzer.Liveness (analyzeLiveness)
 import Xast.SemAnalyzer.Monad
 import Xast.SemAnalyzer.Ownership (checkOwnership)
 import Xast.SemAnalyzer.ResolveNames (resolveNames)
@@ -58,15 +59,18 @@ fullAnalysis reportWarnings saveFile programs packageOfModule target = do
    let programsZonked = map (zonkProgram symTable5.tySubst) programsTyped
 
    (programsDesugared, symTable6, warnings6) <- ExceptT $ pure $ runPhase env symTable5 (forM programsZonked desugarProgram)
+   lift $ reportWarnings warnings6
+
+   (programsLivenessAnalyzed, symTable7, warnings7) <- ExceptT $ pure $ runPhase env symTable6 (forM programsDesugared analyzeLiveness)
 
    let warningsCount = sum $ map length [warnings1, warnings2, warnings3, warnings4, warnings5, warnings6]
 
    return $ AnalysisResult
       { warningsCount = warningsCount
-      , progs = programsDesugared
-      , ctorSpans = collectCtorSpans symTable6
-      , intrinsics = collectIntrinsics programsDesugared symTable6
-      , functionModules = collectFunctionModules symTable6
+      , progs = programsLivenessAnalyzed
+      , ctorSpans = collectCtorSpans symTable7
+      , intrinsics = collectIntrinsics programsDesugared symTable7
+      , functionModules = collectFunctionModules symTable7
       }
 
 -- | All @Intrinsic declarations, by extern id.
