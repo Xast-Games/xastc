@@ -1,10 +1,11 @@
 module Xast.SemAnalyzer.OwnershipTable where
 
 import qualified Data.Map as M
+import qualified Data.Set as S
+
+import Control.Monad.Reader (ReaderT)
 
 import Xast.AST
-import qualified Data.Set as S
-import Control.Monad.Reader (ReaderT)
 import Xast.SemAnalyzer.Monad (SemAnalyzer)
 
 -- #### OWNERSHIP ANALYSIS TABLE ####
@@ -12,6 +13,10 @@ import Xast.SemAnalyzer.Monad (SemAnalyzer)
 type Walk = ReaderT WalkEnv SemAnalyzer
 
 type Needed = M.Map VarName Location
+
+data Usage
+   = ReadOnly              -- T, match wing, condition
+   | Handed SecondNameKind -- *T, let value, returned, stored, captured
 
 newtype WalkEnv = WalkEnv
    { notOwned :: S.Set VarName
