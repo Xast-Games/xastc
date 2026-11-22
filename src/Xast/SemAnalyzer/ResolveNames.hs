@@ -271,9 +271,9 @@ resolveExpr scope imports expr = case expr of
    ExpLit (ParsedInfo loc) lit -> pure $ ExpLit (ResolvedInfo loc Nothing) lit
 
    ExpLambda (ParsedInfo loc) (Lambda args body) -> do
-      argScope <- freshCheckedScope scope imports (concatMap patternVarLocs args)
+      argScope <- freshCheckedScope scope imports (concatMap (patternVarLocs . (.pat)) args)
       body' <- resolveExprAt (M.union argScope scope) imports body
-      let args' = map (resolvePattern argScope) args
+      let args' = map (\param -> LambdaParam param.mark (resolvePattern argScope param.pat)) args
       pure $ ExpLambda (ResolvedInfo loc Nothing) (Lambda args' body')
 
    ExpApp (ParsedInfo loc) lhs rhs -> do

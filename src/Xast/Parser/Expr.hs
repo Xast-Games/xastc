@@ -2,19 +2,19 @@
 {-# LANGUAGE RecordWildCards #-}
 module Xast.Parser.Expr where
 
-import qualified Text.Megaparsec.Char.Lexer as L
-
 import Control.Monad.Combinators.Expr
 
 import Data.List (foldl', foldl1')
-import Data.Text (Text, pack)
+import Data.Text (Text)
 
 import Text.Megaparsec
-import Text.Megaparsec.Char (char, string, char', string')
+import Text.Megaparsec.Char (string)
 
 import Xast.AST
 import Xast.Parser.Common (Parser, lexeme, symbol, located, withLoc)
 import Xast.Parser.Ident (varIdent, typeIdent)
+import Xast.Parser.Literal (literal, decimalLiteral)
+import Xast.Parser.Type (mark')
 
 pattern' :: Parser (Pattern Parsed)
 pattern' = choice
@@ -320,11 +320,14 @@ ifThenElse = do
 lambda :: Parser (Lambda Parsed)
 lambda = do
    _        <- symbol ".\\"
-   args     <- some pattern'
+   args     <- some lambdaParam
    _        <- symbol "->"
-   body     <- expr
+   body     <- expr 
 
    return Lambda {..}
+
+lambdaParam :: Parser (LambdaParam Parsed)
+lambdaParam = LambdaParam <$> mark' <*> pattern'
 
 letIn :: Parser (LetIn Parsed)
 letIn = do
@@ -342,64 +345,3 @@ let' = do
    value     <- expr
 
    return Let {..}
-
-literal :: Parser Literal
-literal = choice
-   [ tupleOrParensLit
-   , LitString <$> stringLiteral
-   , LitChar   <$> charLiteral
-   , LitFloat  <$> try floatLiteral
-   , LitDouble <$> try doubleLiteral
-   , LitInt    <$> intLiteral
-   , LitList   <$> between (symbol "[") (symbol "]") (located literal `sepBy` symbol ",")
-   ]
-
-tupleOrParensLit :: Parser Literal
-tupleOrParensLit = between (symbol "(") (symbol ")") $ do
-   ts <- located literal `sepBy` symbol ","
-   case ts of
-      [] -> pure (LitTuple [])
-      [t] -> pure t.node
-      manyT -> pure (LitTuple manyT)
-
-decimalLiteral :: Parser Int
-decimalLiteral = lexeme L.decimal
-
-intLiteral :: Parser IntLiteral
-intLiteral = lexeme $ do
-   (isHex, value :: Integer) <- choice
-      [ (False,) <$> try (string "0b" *> L.binary)
-      , (True,)  <$> (string "0x" *> L.hexadecimal)
-      , (False,) <$> (string "0o" *> L.octal)
-      , (False,) <$> L.decimal
-      ]
-
-   let sep = if isHex then "_" else mempty
-
-   kind <- choice
-      [ USize  <$ string' (sep <> "uz")
-      , ULong  <$ string' (sep <> "ul")
-      , UShort <$ string' (sep <> "us")
-      , UByte  <$ string' (sep <> "ub")
-      , UInt   <$ string' (sep <> "u")
-      , Size   <$ string' (sep <> "z")
-      , Long   <$ string' (sep <> "l")
-      , Short  <$ string' (sep <> "s")
-      , Byte   <$ string' (sep <> "b")
-      , pure Int
-      ]
-
-   return IntLiteral {..}
-
-doubleLiteral :: Parser Double
-doubleLiteral = lexeme L.float
-
-floatLiteral :: Parser Float
-floatLiteral = lexeme (L.float <* char' 'f')
-
-charLiteral :: Parser Char
-charLiteral = lexeme $ between (char '\'') (char '\'') L.charLiteral
-
-stringLiteral :: Parser Text
-stringLiteral = pack <$> lexeme lit
-   where lit = char '\"' *> manyTill L.charLiteral (char '\"')

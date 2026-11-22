@@ -50,6 +50,8 @@ substituteInfo :: M.Map Type Type -> LivenessAnalyzed -> LivenessAnalyzed
 substituteInfo typeParams info = LivenessInfo
    { ty  = substituteTypeParams typeParams info.ty
    , res = info.res
+   , location = info.location
+   , decision = info.decision
    }
 
 -- | Puts function instances into the module that declares their function,

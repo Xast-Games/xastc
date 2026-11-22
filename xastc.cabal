@@ -34,6 +34,7 @@ library
         Xast.Parser.Function,
         Xast.Parser.Headers,
         Xast.Parser.Ident,
+        Xast.Parser.Literal,
         Xast.Parser.Program,
         Xast.Parser.System,
         Xast.Parser.Type,

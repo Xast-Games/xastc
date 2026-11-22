@@ -93,7 +93,7 @@ inferType imports expression = case expression of
       typedRest <- mapM (inferType imports) rest
       -- Check inner list types
       forM_ typedRest $ \other ->
-         compareListElems 
+         compareListElems
             (exprAnnotation typedFirst).location (typeOf typedFirst)
             (exprAnnotation other).location (typeOf other)
       -- Type of list is defined as `List a`,
@@ -134,14 +134,16 @@ inferType imports expression = case expression of
 
    ExpLambda (ResolvedInfo location maybeResolution) (Lambda args body) -> do
       argTypeVars <- forM args $ const freshTyVar
-      inferred  <- zipWithM (inferPattern imports) argTypeVars args
-      let (typedArgs, argVarMaps) = unzip inferred
+      inferred  <- zipWithM (inferPattern imports) argTypeVars (map (.pat) args)
+      let (typedPatterns, argVarMaps) = unzip inferred
+      let typedArgs = zipWith (\param typed -> LambdaParam param.mark typed) args typedPatterns
       let argVars = M.unions argVarMaps
 
       typedBody <- withVars argVars (inferType imports body)
 
       resolvedArgTypes <- mapM resolve argTypeVars
-      let exprType = functionType (map readOnly resolvedArgTypes) [readOnly (typeOf typedBody)]
+      let markedArgTypes = zip (map (.mark) args) resolvedArgTypes
+      let exprType = functionType (map (uncurry MarkedType) markedArgTypes) [readOnly (typeOf typedBody)]
       pure $ ExpLambda (TypedInfo location exprType maybeResolution) (Lambda typedArgs typedBody)
 
    ExpRecConstruct (ResolvedInfo location maybeResolution) (RecConstruct bindAlias ctorName assigns) -> do

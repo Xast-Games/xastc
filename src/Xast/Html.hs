@@ -135,7 +135,7 @@ collectTokens node = case node of
       concatMap collectTokens xs
 
    ExpLambda _ (Lambda pats lamBody) ->
-      concatMap collectPatternTokens pats ++ collectTokens lamBody
+      concatMap (collectPatternTokens . (.pat)) pats ++ collectTokens lamBody
 
    ExpApp _ f x ->
       collectTokens f ++ collectTokens x

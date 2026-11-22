@@ -326,8 +326,14 @@ data IfThenElse a = IfThenElse
    deriving (Eq, Show, Functor, Foldable, Traversable)
 
 data Lambda a = Lambda
-   { args :: [Pattern a]
+   { args :: [LambdaParam a]
    , body :: Expr a
+   }
+   deriving (Eq, Show, Functor, Foldable, Traversable)
+
+data LambdaParam a = LambdaParam
+   { mark :: Mark
+   , pat  :: Pattern a
    }
    deriving (Eq, Show, Functor, Foldable, Traversable)
 

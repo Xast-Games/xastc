@@ -71,10 +71,25 @@ Here `s` is owned (`*`). `s.items` moves out into `set` and is refilled by the u
 | Result | Meaning |
 |---|---|
 | `-> U` | an ordinary value. For an extern function it never aliases a parameter (see P7) |
-| `-> (…, *T)` | hands back a `*T` parameter: the same object |
-| `-> *T` with no matching `*T` parameter | **illegal**. Nothing is being handed back, and semantically it would be just `-> T` |
+| `-> (…, *T)` | hands back a `*T` parameter: **the same object**, not just another value of type `T` |
+| `-> *T` with no matching `*T` parameter | **illegal**. Nothing is being handed back; for a fresh or different value write `-> T` |
 
 A tuple in a result position is a list of results, not data.
+
+**Hand-back is identity [decided].** A `*T` result is not "a unique `T`": it is the same ownership chain as one of the `*T` parameters, with the same storage. That makes `*Console` one linear chain from the caller's `console` to the `console2` it gets back.
+
+- **Pairing.** The k-th `*T` result is the k-th `*T` parameter of type `T`, in order. `fn(*A, *A) -> (*A, *A)` hands back the first to the first and the second to the second. One parameter is never handed back twice, and a `*T` result with no unused `*T` parameter is the error above.
+- **Checking a body.** In a function, system or lambda, the result slot must be one of three forms, and the parameter must not be used afterwards (a move, never a clone):
+  1. the parameter itself: `fn id x = x`;
+  2. a record update of it: `s { items = set x 0 s.items }` (2.2);
+  3. a **refill**: a tuple or a single-constructor value built from the parts the parameter was destructured into, in the same branch: `fn bump (a, b) = (f a, g b)`, `fn step (State a b) = State (f a) b`. The backend overwrites the fields in the old storage.
+
+  Anything else in the slot is an error: a fresh value, another parameter, an alias (`let y = x in y` after `x` was used again) or a clone. Such a function takes the value with `*T` and returns `-> T`: it consumes the argument and returns a new value, and the compiler may reuse the storage as an optimization, but the caller cannot rely on it.
+- **Branches.** Every branch of an `if` or a `match` must hand back the paired parameter, each in one of the forms above. If one branch hands it back and another returns a fresh value, it is an error.
+- **Refill is limited to types of fixed size** for now: tuples, records and types with one constructor. For types with several constructors, and for recursive types whose variants live on the heap with different sizes, `-> *T` is rejected and the function is written `-> T`.
+- **Checking an extern.** The signature is trusted (P7), as before.
+- **Calls.** The caller may rely on the identity: the result lives where the argument lived, so the backend may pass a pointer in and out instead of copying the value (P7).
+- **Function types.** Marks are compared strictly. A `fn(*a) -> *a` is not usable where `fn(*a) -> a` is expected, because the two are called differently.
 
 Function types and signatures carry the same marks: each argument is a type plus a uniqueness mark, and so is each result (`fn(*a, b) -> *a`). Two function types are equal only if their marks match.
 
@@ -84,7 +99,7 @@ Function types and signatures carry the same marks: each argument is a type plus
 |---|---|
 | `T -> U`, `U` unrelated to `T` | a read |
 | `T -> T` | reads its argument and returns a **new** value: `reverse`, `sorted`, `cloneVector : FFIVector -> FFIVector` |
-| `*T -> *T` | a write: takes the value and hands it back changed |
+| `*T -> *T` | a write: takes the value and hands **the same one** back changed |
 | `*T -> (U, *T)` | a write that also returns something, e.g. `readInt : *Console -> (Int, *Console)` |
 | `*T -> U` | consumes the value: `close : *File -> ()`, `finish : *StringBuilder -> String` |
 | `() -> T` | builds a fresh value: `newVec : () -> Vec a` |
@@ -106,7 +121,7 @@ Side effects are part of this: anything that changes the world takes its handle 
 Everything above says where a clone **happens**. Whether the programmer must also **write** it down is a setting of the package, in its `xast.toml`:
 
 ```toml
-[ownership]
+[dataflow]
 explicit_copy   = false    # default: clones are inserted and reported
 explicit_boxing = false    # default: recursive fields are boxed implicitly (memory.md, 8)
 ```
@@ -405,7 +420,7 @@ system Move #(Pos, Vel), #(Camera) | *Console, Gravity -> (
 - **Resources** after `|` keep `*`: `*R` is a write and a bare `R` a read. A resource type must be `@Singleton`; otherwise it is a compile error.
 - A system that receives `*R` **must hand it back**. If the body consumes it (`finish builder`), that step is fine, but the result then asks for a value that is gone: the use-after-move error of P6, at the result.
 - A system may create its own local non-copyable values and consume them (a `*File` opened and closed within one run).
-- A system could consume a received resource and return a *fresh* one of the same type. The rules accept that; whether it is acceptable is an ECS policy.
+- A system may not swap a received resource for a fresh one of the same type: the slot of `*R` must hand back that same `R` (2.3).
 - The signature tells read from write: two systems that only read a resource do not conflict, so they can run in parallel; any `*R` conflicts with every other user of `R`.
 - **Overlapping groups.** If the components of one query group are all contained in another group, every entity that matches the larger group also matches the smaller one, so two groups can denote the same entity. That is a compile error: `#(A), #(A)` or `#(A, B), #(A)`. Tell the groups apart with tags: `#(Tag1, A), #(Tag2, A)`. An entity that carries both tags still matches both groups; that case cannot be seen at compile time and is the programmer's responsibility.
 - **Writes in a multi-group system.** A system with several query groups runs over their combinations, so a written component of one group can be written once per entity of another group (each `Enemy`'s `Transform` once per `Player`). That is the programmer's responsibility, but `@Parallel` on a system with several groups that writes any of them is an error, since such writes could race.
@@ -506,14 +521,14 @@ The result is a table keyed by the source position of each second name ("move", 
 
 1. **Copyability** in the type checker: `@Copyable` as an explicit opt-in with the field check, `@Copyable(fn)` with its signature check, `@Pod` checked on Xast types and trusted on extern types, and `@Pod` with `@Drop` rejected. [implemented: `SemAnalyzer/Ownership.hs`; Std types annotated; `@Drop(fn)` must be `fn(*T) -> ()`] Annotate the Std types (`Int`, `Float`, `Char`, `Bool`, `Option`, `Result`, `List`, ...).
 2. **Parameter modes**: parse `*` on parameters and on a handed-back result. Function types and signatures carry the marks, and results do too. Check the rules in 2.3. [implemented: parameters and results are `MarkedType`s (`Read` or `Take`) in `TyFn`, `FuncDef` and `ExternFunc`; unification compares marks; a `*` result needs a `*` parameter of its type. Resources in systems (`| *R`) belong to step 9]
-3. **The analysis pass**: liveness per path and field path, second names, summaries, the table, errors with two markers. The main piece.
+3. **The analysis pass**: liveness per path and field path, second names, summaries, the table, errors with two markers. It also checks hand-back identity (2.3): every `*` result slot of a function, system or lambda must be its paired `*` parameter at its last use. The main piece.
 4. **Clone insertion** in lowering for `@Copyable` types, plus a clone operation in the intermediate representation and the backend.
 5. **A loop construct** in the intermediate representation and self tail calls compiled to it.
 6. **`--report-costs`**: the clones section (the allocations section is in `memory.md`).
 7. **Std**: `Vec` with `*` parameters, `withAt` and `modifyAt`.
 8. **The native mapping** in the backend (P7).
 9. **ECS resources and the system syntax** (P16): the result slots, the `@Singleton` check, the overlapping-groups error, the `@Parallel` check. Today `@Singleton` is parsed but unused, `SrcSingleton` is never produced, and the lowerer accepts only one written binding.
-10. **The modes** (2.6): the `[ownership]` table in `xast.toml`, the keywords `copy` and `boxed`, and their errors and warnings.
+10. **The modes** (2.6): the `[dataflow]` table in `xast.toml`, the keywords `copy` and `boxed`, and their errors and warnings.
 11. **Operators** (P18): `opConcat` with `*` operands; `concatenative` extended with the Std collections, through a Std-only marker instead of type names in the compiler.
 12. **Variants** (P19): the `@SharedVariant` signature check and its hint; partial application desugared into lambdas, and lambdas lowered as closures on the stack.
 13. **Later:** the lazy-clone dry run and, if it pays off, the optimization (P17); concatenation chains with one allocation (P18).

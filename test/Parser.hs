@@ -576,36 +576,52 @@ exprTests = TestLabel "Expr (atoms)" $ TestList
       assertParses expr ".\\x -> x" $
          ExpLambda info $
                Lambda
-                  [PatVar info (Ident "x")]
+                  (params [PatVar info (Ident "x")])
                   (ExpVar info Nothing (Ident "x"))
 
    , TestCase $
       assertParses expr ".\\x y -> x" $
          ExpLambda info $
                Lambda
-                  [PatVar info (Ident "x"), PatVar info (Ident "y")]
+                  (params [PatVar info (Ident "x"), PatVar info (Ident "y")])
                   (ExpVar info Nothing (Ident "x"))
 
    , TestCase $
       assertParses expr ".\\a b c -> c" $
          ExpLambda info $
                Lambda
-                  [PatVar info (Ident "a"), PatVar info (Ident "b"), PatVar info (Ident "c")]
+                  (params [PatVar info (Ident "a"), PatVar info (Ident "b"), PatVar info (Ident "c")])
                   (ExpVar info Nothing (Ident "c"))
 
    , TestCase $
       assertParses expr ".\\(x, y) -> x" $
          ExpLambda info $
                Lambda
-                  [PatTuple info [PatVar info (Ident "x"), PatVar info (Ident "y")]]
+                  (params [PatTuple info [PatVar info (Ident "x"), PatVar info (Ident "y")]])
                   (ExpVar info Nothing (Ident "x"))
 
    , TestCase $
       assertParses expr ".\\MyStruct a b -> a" $
          ExpLambda info $
                Lambda
-                  [PatCon info (Ident "MyStruct") [PatVar info (Ident "a"), PatVar info (Ident "b")]]
+                  (params [PatCon info (Ident "MyStruct") [PatVar info (Ident "a"), PatVar info (Ident "b")]])
                   (ExpVar info Nothing (Ident "a"))
+
+   , TestCase $
+      assertParses expr ".\\*x y -> x" $
+         ExpLambda info $
+               Lambda
+                  [ LambdaParam Take (PatVar info (Ident "x"))
+                  , LambdaParam Read (PatVar info (Ident "y"))
+                  ]
+                  (ExpVar info Nothing (Ident "x"))
+
+   , TestCase $
+      assertParses expr ".\\*(x, y) -> x" $
+         ExpLambda info $
+               Lambda
+                  [LambdaParam Take (PatTuple info [PatVar info (Ident "x"), PatVar info (Ident "y")])]
+                  (ExpVar info Nothing (Ident "x"))
 
    -- If
    , TestCase $
@@ -1609,6 +1625,9 @@ info :: Parsed
 info = ParsedInfo testLocation
 
 -- | An unsuffixed integer literal.
+params :: [Pattern Parsed] -> [LambdaParam Parsed]
+params = map (LambdaParam Read)
+
 int :: Integer -> IntLiteral
 int = IntLiteral Int
 

@@ -104,7 +104,7 @@ The questions are whether it needs an atomic counter for use across threads, and
 
 **Ownership.** A boxed child is owned by its parent: copying the parent copies the nodes (`@Copyable` needs the boxed type to be copyable), and freeing the parent frees them, with the compiler generating that code.
 
-**Visibility and modes.** By default the allocation is implicit, so it is reported, as clones are: the allocations section of `--report-costs` lists which fields are boxed and therefore which constructors allocate (`uniqueness.md`, P14). A package can instead require the annotation: with `explicit_boxing = true` in its `xast.toml`, every field the rule boxes must be marked `boxed`, and a missing mark is an error; in the default mode `boxed` is allowed but redundant. Both modes produce the same layout. See `uniqueness.md`, 2.6.
+**Visibility and modes.** By default the allocation is implicit, so it is reported, as clones are: the allocations section of `--report-costs` lists which fields are boxed and therefore which constructors allocate (`uniqueness.md`, P14). A package can instead require the annotation: with `explicit_boxing = true` in the `[dataflow]` table of its `xast.toml`, every field the rule boxes must be marked `boxed`, and a missing mark is an error; in the default mode `boxed` is allowed but redundant. Both modes produce the same layout. See `uniqueness.md`, 2.6.
 
 A type with no constructor that avoids the recursion (`type Bad = Bad Bad`) has no finite value, and is an error.
 

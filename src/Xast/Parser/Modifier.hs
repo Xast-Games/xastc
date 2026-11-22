@@ -8,7 +8,7 @@ import Text.Megaparsec
 
 import Xast.AST (Modifier (..), ModifierTarget (..), ComponentDispatchMode (..), displayModifier, displayTarget, modifierTargets)
 import Xast.Parser.Common (Parser, symbol)
-import Xast.Parser.Expr (stringLiteral)
+import Xast.Parser.Literal (stringLiteral)
 import Xast.Parser.Ident (fnIdent, typeIdent)
 
 failAt :: Int -> String -> Parser a

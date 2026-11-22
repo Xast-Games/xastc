@@ -3,9 +3,8 @@
 module Xast.Parser.Type where
 
 import Data.List (foldl1')
-import Data.Maybe (isJust)
 
-import Text.Megaparsec (choice, sepBy, between, some, MonadParsec (try), many, sepBy1, sepEndBy, optional)
+import Text.Megaparsec (choice, sepBy, between, some, MonadParsec (try), many, sepBy1, sepEndBy)
 
 import Xast.AST
 import Xast.Parser.Common (Parser, symbol, lexeme, endOfStmt, withLoc, located)
@@ -87,12 +86,19 @@ markedTuple = do
       then fail "not a tuple of results with a `*`"
       else pure elements
 
+mark' :: Parser Mark
+mark' = choice
+   [ Take <$ symbol "*"
+   -- , OtherMarks <$ symbol "?"
+   , Read |> pure
+   ]
+
 -- | A type with an optional @*@ in front.
 markedType :: Parser (Located MarkedType)
 markedType = located $ do
-   star <- optional (symbol "*")
+   mark <- mark'
    ty   <- type'
-   pure MarkedType { mark = if isJust star then Take else Read, ty = ty }
+   pure MarkedType { .. }
 
 typeIntrinsic :: Parser TyIntrinsic
 typeIntrinsic = choice
