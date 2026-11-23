@@ -92,7 +92,7 @@ The questions are whether it needs an atomic counter for use across threads, and
 |---|---|
 | a name used twice, copyable type | one clone, in the clones section of `--report-costs` |
 | a name used twice, non-copyable type | a compile error |
-| a read-only alias `let b = a` while `a` is used later | one clone that a later optimization may remove (`uniqueness.md`, P17) |
+| a read-only alias `let b = a` while `a` is used later | one clone that a later optimization may remove (`uniqueness-questions.md`, P17) |
 | a constructor with a boxed field | one allocation, in the allocations section of `--report-costs` |
 | several holders of one large value | a copy each, until the opt-in shared type exists |
 
@@ -104,7 +104,7 @@ The questions are whether it needs an atomic counter for use across threads, and
 
 **Ownership.** A boxed child is owned by its parent: copying the parent copies the nodes (`@Copyable` needs the boxed type to be copyable), and freeing the parent frees them, with the compiler generating that code.
 
-**Visibility and modes.** By default the allocation is implicit, so it is reported, as clones are: the allocations section of `--report-costs` lists which fields are boxed and therefore which constructors allocate (`uniqueness.md`, P14). A package can instead require the annotation: with `explicit_boxing = true` in the `[dataflow]` table of its `xast.toml`, every field the rule boxes must be marked `boxed`, and a missing mark is an error; in the default mode `boxed` is allowed but redundant. Both modes produce the same layout. See `uniqueness.md`, 2.6.
+**Visibility and modes.** By default the allocation is implicit, so it is reported, as clones are: the allocations section of `--report-costs` lists which fields are boxed and therefore which constructors allocate (`uniqueness-questions.md`, P14). A package can instead require the annotation: with `explicit_boxing = true` in the `[dataflow]` table of its `xast.toml`, every field the rule boxes must be marked `boxed`, and a missing mark is an error; in the default mode `boxed` is allowed but redundant. Both modes produce the same layout. See `uniqueness.md`, 2.6.
 
 A type with no constructor that avoids the recursion (`type Bad = Bad Bad`) has no finite value, and is an error.
 
@@ -121,7 +121,7 @@ Not chosen: an explicit `Box` type (construction and patterns would have to wrap
 | `ChunkedVec a` | contiguous blocks | large data with localized writes, such as voxel chunks |
 | `String` | a `Vec Byte` holding UTF-8 | text |
 
-All of them are concatenative, so `<>` works on them (`uniqueness.md`, P18). With one owner per value they are changed in place by their owner; there is no separate mutable variant. Cheap snapshots of `RRB` and `ChunkedVec`, which share nodes or chunks, wait for the shared type (section 6); until then a clone copies.
+All of them are concatenative, so `<>` works on them (`uniqueness-std.md`, P18). With one owner per value they are changed in place by their owner; there is no separate mutable variant. Cheap snapshots of `RRB` and `ChunkedVec`, which share nodes or chunks, wait for the shared type (section 6); until then a clone copies.
 
 **Layers.** Unsafe code stays at the bottom:
 
@@ -189,7 +189,7 @@ fn appendString left right = left { bytes = append left.bytes right.bytes };
 
 ## 11. Plan
 
-1. The ownership analysis in `uniqueness.md` (its step 3).
+1. The ownership analysis in `uniqueness-implementation.md` (its step 3).
 2. Define the `Std.Alloc` intrinsics in the compiler (`alloc`, `realloc`, `free`, `ptrRead`, `ptrWrite`, `ptrOffset`, `ptrCopy`, `ptrMove`) and `sizeOf`.
 3. Parse `@Drop(fn)` on types.
 4. Insert frees after the analysis: generated code for types defined in Xast, the `@Drop` function for opaque types.

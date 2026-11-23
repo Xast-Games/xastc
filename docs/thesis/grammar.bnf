@@ -1,0 +1,332 @@
+(* ======================================================================
+   Граматика мови Xast, зібрана з src/Xast/Parser/*.hs
+
+   Нотація (EBNF):
+     Правило ::= ...     визначення нетермінала; назви збігаються з AST
+     a b                 послідовність
+     a | b               альтернатива
+     { a }               повторення a нуль або більше разів
+     [ a ]               необов'язкове a
+     ( a )               групування
+     "текст"             термінал
+     <назва>             клас символів, описаний словами
+     коментарі           пишуться між парою дужка-зірочка та зірочка-дужка
+
+   Між лексемами можуть стояти пробіли та коментарі (див. розділ Лексична
+   структура). Контекстні умови, які контекстно-вільна граматика виразити
+   не може, наведені в кінці файлу.
+
+   ====================================================================== *)
+
+(* ---------------------------------------------------------------------
+   1. Програма (Program.hs, Headers.hs)
+   --------------------------------------------------------------------- *)
+
+Program       ::= ModuleDef { ImportDef } { Stmt }
+
+Stmt          ::= Func | System | TypeDef | Extern
+
+Func          ::= FuncDef | FuncImpl
+
+System        ::= SystemDef | SystemImpl
+
+Extern        ::= ExternFunc | ExternType
+
+ModuleDef     ::= "module" ModuleName "exports" ExportPayload
+
+ModuleName    ::= TypeIdent { "." TypeIdent }
+
+ExportPayload ::= "{" ExportItem { "," ExportItem } [ "," ] "}"
+                | "*"
+
+ExportItem    ::= TypeIdent [ ExportMembers ]
+                | FnIdent
+
+ExportMembers ::= "(" ( ".." | ExportMember { "," ExportMember } [ "," ] ) ")"
+
+ExportMember  ::= TypeIdent | FnIdent
+
+ImportDef     ::= "use" ModuleName ImportPayload
+
+ImportPayload ::= "as" TypeIdent
+                | "{" ImportItem { "," ImportItem } [ "," ] "}"
+                | "*"
+
+ImportItem    ::= TypeIdent | FnIdent
+
+
+(* ---------------------------------------------------------------------
+   2. Модифікатори (Modifier.hs)
+   --------------------------------------------------------------------- *)
+
+Modifier      ::= "@" ModifierBody
+
+ModifierBody  ::= "SharedVariant" "(" FnIdent ")"
+                | "Memoize"
+                | "Inline"
+                | "Deprecated" "(" StringLiteral ")"
+                | "SuppressUnreachable"
+                | "CompileTime"
+                | "Mode" "(" DispatchMode ")"
+                | "Label" "(" TypeIdent ")"
+                | "Parallel"
+                | "Singleton"
+                | "Copyable" [ "(" FnIdent ")" ]
+                | "Pod"
+                | "Drop" "(" FnIdent ")"
+                | "Tag"
+                | "NonExhaustive"
+                | "Intrinsic"
+
+DispatchMode  ::= "Dynamic" | "Safe" | "Strict"
+
+
+(* ---------------------------------------------------------------------
+   3. Функції (Function.hs)
+   --------------------------------------------------------------------- *)
+
+(* Оголошення сигнатури; модифікатори дозволені лише тут. *)
+FuncDef       ::= { Modifier } "fn" FnIdent Params "->" Results ";"
+
+(* Один клоз функції, аргументи якого є шаблонами. *)
+FuncImpl      ::= "fn" FnIdent { AtomPattern } "=" Expr ";"
+
+Params        ::= "(" [ MarkedType { "," MarkedType } ] ")"
+
+(* Один результат або кортеж результатів, у якому хоча б один має зірочку:
+   fn(Int) -> Int, fn(*Console) -> (Int, *Console). *)
+Results       ::= ResultsTuple | MarkedType
+
+ResultsTuple  ::= "(" MarkedType "," MarkedType { "," MarkedType } ")"
+
+MarkedType    ::= [ "*" ] Type
+
+
+(* ---------------------------------------------------------------------
+   4. Типи (Type.hs)
+   --------------------------------------------------------------------- *)
+
+TypeDef       ::= { Modifier } "type" TypeIdent { GenericIdent }
+                  "=" Ctor { "|" Ctor } ";"
+
+Ctor          ::= TypeIdent Payload
+
+Payload       ::= "{" [ Field { "," Field } [ "," ] ] "}"    (* запис *)
+                | AtomType { AtomType }                      (* кортеж полів *)
+                |                                            (* без даних *)
+
+Field         ::= VarIdent ":" Type
+
+(* Застосування типів записом поруч, лівоасоціативне: Option a, Vec (List Int). *)
+Type          ::= AtomType { AtomType }
+
+AtomType      ::= "(" [ Type { "," Type } ] ")"              (* (), (T), (T1, T2) *)
+                | FnType
+                | TypeIdent
+                | "number"
+                | "concatenative"
+                | GenericIdent
+
+FnType        ::= "fn" Params "->" Results
+
+
+(* ---------------------------------------------------------------------
+   5. Зовнішні оголошення (Extern.hs)
+   --------------------------------------------------------------------- *)
+
+ExternFunc    ::= { Modifier } "extern" "fn" FnIdent Params "->" Results ";"
+
+ExternType    ::= { Modifier } "extern" "type" TypeIdent { GenericIdent } ";"
+
+
+(* ---------------------------------------------------------------------
+   6. Системи (System.hs)
+   --------------------------------------------------------------------- *)
+
+(* Оголошення; модифікатори дозволені лише тут. *)
+SystemDef     ::= { Modifier } "system" TypeIdent { QueriedEntity }
+                  "->" Type [ WithClause ] ";"
+
+QueriedEntity ::= "#(" Type { "," Type } [ "," ] ")"
+
+WithClause    ::= "with" WithItem { "," WithItem }
+
+WithItem      ::= "event" ":" Type
+                | "res" ":" Type
+
+(* Реалізація системи: зіставлення компонентів сутностей зі шаблонами. *)
+SystemImpl    ::= "system" TypeIdent [ EntityPattern { "," EntityPattern } ]
+                  [ "with" AtomPattern { AtomPattern } ] "=" Expr ";"
+
+EntityPattern ::= AtomPattern { AtomPattern }
+
+
+(* ---------------------------------------------------------------------
+   7. Вирази (Expr.hs)
+
+   Оператори від найнижчого пріоритету (ApplyExpr) до найвищого
+   (UnaryExpr). Рівень порівнянь допускає не більше одного оператора:
+   a < b < c є помилкою.
+   --------------------------------------------------------------------- *)
+
+Expr          ::= ApplyExpr
+
+ApplyExpr     ::= ConcatExpr [ "<|" ApplyExpr ]              (* правоасоціативний *)
+ConcatExpr    ::= PipeExpr { "<>" PipeExpr }                 (* лівоасоціативний *)
+PipeExpr      ::= OrExpr { "|>" OrExpr }                     (* лівоасоціативний *)
+OrExpr        ::= AndExpr [ "||" OrExpr ]                    (* правоасоціативний *)
+AndExpr       ::= BitOrExpr [ "&&" AndExpr ]                 (* правоасоціативний *)
+BitOrExpr     ::= BitXorExpr { "|" BitXorExpr }              (* лівоасоціативний *)
+BitXorExpr    ::= BitAndExpr { "^" BitAndExpr }              (* лівоасоціативний *)
+BitAndExpr    ::= CompareExpr { "&" CompareExpr }            (* лівоасоціативний *)
+CompareExpr   ::= ShiftExpr [ CompareOp ShiftExpr ]          (* не більше одного *)
+ShiftExpr     ::= AddExpr { ( "<<" | ">>" ) AddExpr }        (* лівоасоціативний *)
+AddExpr       ::= MulExpr { ( "+" | "-" ) MulExpr }          (* лівоасоціативний *)
+MulExpr       ::= PowExpr { ( "*" | "/" | "%" ) PowExpr }    (* лівоасоціативний *)
+PowExpr       ::= UnaryExpr [ "**" PowExpr ]                 (* правоасоціативний *)
+UnaryExpr     ::= { "!" | "-" } Term                         (* префіксний *)
+
+CompareOp     ::= "==" | "!=" | "<=" | ">=" | "<" | ">"
+
+(* Застосування функції записом поруч, лівоасоціативне: f a b. *)
+Term          ::= PostfixExpr { PostfixExpr }
+
+(* Доступ до поля або оновлення застосовується до виразу перед ним. *)
+PostfixExpr   ::= AtomExpr { "." Getter } { RecUpdate }
+
+Getter        ::= Decimal | VarIdent                         (* tuple.0, record.field *)
+
+RecUpdate     ::= "{" RecAssign { "," RecAssign } [ "," ] "}"
+
+AtomExpr      ::= "(" [ Expr { "," Expr } ] ")"              (* (), (e), (e1, e2) *)
+                | [ TypeIdent "." ] VarIdent                 (* змінна, можливо з префіксом *)
+                | RecConstruct
+                | [ TypeIdent "." ] TypeIdent                (* конструктор *)
+                | "[" [ Expr { "," Expr } ] "]"              (* список *)
+                | Literal
+                | Lambda
+                | LetIn
+                | IfThenElse
+                | Match
+
+RecConstruct  ::= [ TypeIdent "." ] TypeIdent
+                  "{" RecAssign { "," RecAssign } [ "," ] "}"
+
+RecAssign     ::= VarIdent "=" Expr
+
+Lambda        ::= ".\\" LambdaParam { LambdaParam } "->" Expr
+
+LambdaParam   ::= [ "*" ] Pattern
+
+LetIn         ::= Let { "," Let } "in" Expr
+
+Let           ::= "let" Pattern "=" Expr
+
+IfThenElse    ::= "if" Expr "then" Expr "else" Expr
+
+Match         ::= "match" Expr "with" MatchWing { "," MatchWing }
+
+MatchWing     ::= Pattern "->" Expr
+
+
+(* ---------------------------------------------------------------------
+   8. Шаблони (Expr.hs)
+   --------------------------------------------------------------------- *)
+
+Pattern       ::= TypeIdent AtomPattern { AtomPattern }      (* конструктор з полями *)
+                | AtomPattern
+
+AtomPattern   ::= "(" [ Pattern { "," Pattern } ] ")"        (* (), (p), (p1, p2) *)
+                | "_"
+                | VarIdent
+                | TypeIdent                                  (* конструктор без полів *)
+                | "[" [ Pattern { "," Pattern } ] "]"
+                | Literal
+
+
+(* ---------------------------------------------------------------------
+   9. Літерали (Literal.hs)
+   --------------------------------------------------------------------- *)
+
+Literal       ::= "(" [ Literal { "," Literal } ] ")"
+                | StringLiteral
+                | CharLiteral
+                | FloatLiteral
+                | DoubleLiteral
+                | IntLiteral
+                | "[" [ Literal { "," Literal } ] "]"
+
+IntLiteral    ::= IntBody [ IntSuffix ]
+
+IntBody       ::= "0b" <binary-digit> { <binary-digit> }
+                | "0x" <hex-digit> { <hex-digit> }
+                | "0o" <octal-digit> { <octal-digit> }
+                | Decimal
+
+Decimal       ::= <digit> { <digit> }
+
+(* Суфікс обирає цілий тип, регістр не має значення; після шістнадцяткового
+   числа перед ним стоїть підкреслення (0xFF_u), щоб його не прочитали
+   як цифри. *)
+IntSuffix     ::= "uz" | "ul" | "us" | "ub" | "u" | "z" | "l" | "s" | "b"
+
+DoubleLiteral ::= Decimal "." Decimal [ Exponent ]
+FloatLiteral  ::= DoubleLiteral "f"
+Exponent      ::= ( "e" | "E" ) [ "+" | "-" ] Decimal
+
+CharLiteral   ::= "'" <character-with-escapes> "'"
+StringLiteral ::= "\"" { <character-with-escapes> } "\""
+
+
+(* ---------------------------------------------------------------------
+   10. Лексична структура (Ident.hs, Common.hs)
+   --------------------------------------------------------------------- *)
+
+(* Назва типу, конструктора або модуля: починається з великої літери. *)
+TypeIdent     ::= <upper-case-letter> { <letter-or-digit> }
+
+(* Назва функції або змінної: починається з малої літери й може містити
+   апостроф (map', унікальний варіант map). Не є зарезервованим словом. *)
+FnIdent       ::= <lower-case-letter> { <letter-or-digit> | "'" }
+VarIdent      ::= FnIdent
+
+(* Параметр типу: одна мала літера, за якою немає літери чи цифри:
+   a, b, але не ab (це була б змінна). *)
+GenericIdent  ::= <lower-case-letter>
+
+Reserved      ::= "type" | "fn" | "let" | "in" | "if" | "then" | "else"
+                | "match" | "system" | "with" | "extern" | "event" | "res"
+
+(* Пробіли та коментарі між лексемами. *)
+Whitespace    ::= { <space> | <newline> | LineComment }
+LineComment   ::= "--" { <any-character-but-newline> }
+
+
+(* ---------------------------------------------------------------------
+   Контекстні умови (перевіряє парсер, але не ця граматика)
+   ---------------------------------------------------------------------
+
+   1. Модифікатор дозволений лише на певних видах оголошень, і один і той
+      самий модифікатор не можна писати двічі на одному оголошенні.
+      Модифікатори дозволені на FuncDef, TypeDef, ExternFunc, ExternType
+      та SystemDef, і ніколи на FuncImpl та SystemImpl.
+
+   2. FuncDef і FuncImpl обидва починаються з "fn" FnIdent. Парсер спершу
+      пробує FuncDef і, якщо не вийшло, переходить до FuncImpl (комбінатор
+      <-> у Common.hs), а за невдачі обох повідомляє обидві помилки.
+      Оголошення з модифікатором завжди є FuncDef. Те саме для SystemDef
+      та SystemImpl.
+
+   3. ResultsTuple обирається, лише якщо хоча б один його елемент має
+      зірочку; інакше (a, b) це звичайний кортежний тип, тобто один
+      результат.
+
+   4. Оператори "<", ">", "&" та "|" не читаються, коли вони є початком
+      довшого оператора ("<=", "<|", "<<", "<>", ">=", ">>", ">|", "&&",
+      "||", "|>"), щоб перемагав найдовший оператор.
+
+   5. Зарезервовані слова не можна використовувати як FnIdent чи VarIdent.
+
+   6. Оператор закінчується крапкою з комою. Заголовок модуля та рядки use
+      не мають завершувача й стоять перед операторами.
+   --------------------------------------------------------------------- *)

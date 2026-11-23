@@ -1,6 +1,6 @@
 \usepackage[left=30mm, right=10mm, top=20mm, bottom=20mm]{geometry}
-\usepackage[T2A]{fontenc}
-\usepackage[utf8]{inputenc}
+% XeLaTeX: Unicode і системні шрифти (збирати через xelatex або latexmk)
+\usepackage{fontspec}
 \usepackage[ukrainian]{babel}
 \usepackage{setspace}
 \usepackage{graphicx}
@@ -11,49 +11,34 @@
 \usepackage{enumitem}
 \usepackage{icomma}
 \usepackage{tikz}
+\usepackage{tikz-cd}      % діаграми залежностей модулів (tikzcd)
+\usetikzlibrary{babel}    % щоб `"` у підписах стрілок не конфліктував з babel (ukrainian)
 \usepackage{xcolor}
 \usepackage{float}
 \usepackage{tcolorbox}
 \usepackage{listings}
 \usepackage{url}         % links in the bibliography break across lines
-\tcbuselibrary{listings}
+\usepackage[nounderscore]{syntax}      % BNF: середовище grammar, <нетермінал>, \lit{термінал}, \alt (syntax-mdw)
+\tcbuselibrary{listings, skins, breakable}
 
-% #### Мова Xast для лістингів ####
-\lstdefinelanguage{Xast}{
-    morekeywords={module, exports, use, as, type, fn, extern, system, match, with,
-        let, in, if, then, else, copy, boxed, number, concatenative},
-    sensitive=true,
-    morecomment=[l]{--},
-    morestring=[b]"
-}
+% #### Шрифти ####
+% Основний шрифт, схожий на Computer Modern; для Times: \setmainfont{TeX Gyre Termes}
+\setmainfont{CMU Serif}[Scale=0.94]
+% Iosevka Xast лежить у fonts/ (з лігатурою .\ у вигляді лямбди)
+\newfontfamily\xastfont[
+    Path=fonts/, Extension=.ttf,
+    UprightFont=IosevkaXast-Medium, ItalicFont=IosevkaXast-Medium-Italic,
+    BoldFont=IosevkaXast-Medium, BoldItalicFont=IosevkaXast-Medium-Italic,
+]{IosevkaXast}
+\setmonofont[
+    Path=fonts/, Extension=.ttf,
+    UprightFont=IosevkaXast-Medium, ItalicFont=IosevkaXast-Medium-Italic,
+    BoldFont=IosevkaXast-Medium, BoldItalicFont=IosevkaXast-Medium-Italic,
+    Scale=MatchLowercase,
+]{IosevkaXast}
 
-\newtcblisting{xastcode}{
-    listing only,
-    listing options={language=Xast, basicstyle=\ttfamily\small,
-        keywordstyle=\color{blue}, commentstyle=\color{gray}, stringstyle=\color{teal}},
-    colback=black!5,
-    colframe=black!75
-}
-
-\newtcblisting{haskellcode}{
-    listing only,
-    listing options={language=Haskell, basicstyle=\ttfamily\small,
-        keywordstyle=\color{blue}, commentstyle=\color{gray}, stringstyle=\color{teal}},
-    colback=black!5,
-    colframe=black!75
-}
-
-\newtcblisting{ccode}{
-    listing only,
-    listing options={language=C, basicstyle=\ttfamily\small,
-        keywordstyle=\color{blue}, commentstyle=\color{gray}, stringstyle=\color{teal}},
-    colback=black!5,
-    colframe=black!75
-}
-
-% #### Times New Roman font ####
-% \usepackage{mathptmx}
-% \usepackage{tempora}
+% #### Лістинги ####
+\input{config/listings}
 
 \titleformat{\chapter}
     {\normalfont\Large\bfseries\centering}
@@ -66,6 +51,10 @@
 \titleformat{\subsection}
     {\normalfont\large\bfseries}
     {\thesubsection}{1em}{}
+
+% #### Списки: без зайвих проміжків, ромб як маркер першого рівня ####
+\setlist{itemsep=0pt, topsep=0pt}
+\setlist[itemize,1]{label=$\diamond$}
 
 \onehalfspacing
 \setlength{\parindent}{0cm}

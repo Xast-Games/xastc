@@ -2,6 +2,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Xast.AST where
 
+import qualified Data.Set as S
+
 import Data.List (intercalate)
 import Data.Text (Text, unpack, pack)
 
@@ -804,8 +806,28 @@ data NoMoveOutcome
    = Clone
       { inLoop :: Bool -- ^ for @--report-costs@
       }
+   | CloneIf
+      { inLoop   :: Bool
+      , requires :: S.Set Type  -- ^ the generics and inference variables that must be copyable for this clone to exist
+      }
    | Reject
    deriving (Eq, Show)
+
+-- | What a type needs in order to be copied.
+data CopyRequirement
+   = NeverCopyable                  -- ^ some part of the type is not copyable
+   | CopyableIf (S.Set Type)        -- ^ copyable once these generics or variables are; empty means always
+   deriving (Eq, Show)
+
+instance Semigroup CopyRequirement where
+   (<>) :: CopyRequirement -> CopyRequirement -> CopyRequirement
+   NeverCopyable <> _                   = NeverCopyable
+   _ <> NeverCopyable                   = NeverCopyable
+   CopyableIf left <> CopyableIf right  = CopyableIf (S.union left right)
+
+instance Monoid CopyRequirement where
+   mempty :: CopyRequirement
+   mempty = CopyableIf S.empty
 
 data SecondNameKind
    = Rebound         -- ^ @let b = a@

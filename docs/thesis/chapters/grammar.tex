@@ -1,0 +1,287 @@
+% Generated from grammar.bnf by scripts/bnf2tex.py. Do not edit by hand.
+% Usage: \input{chapters/grammar} inside an appendix or a section.
+
+\subsection*{1. Програма}
+
+\begin{grammar}
+
+<Program> ::= <ModuleDef> \{ <ImportDef> \} \{ <Stmt> \}
+
+<Stmt> ::= <Func> | <System> | <TypeDef> | <Extern>
+
+<Func> ::= <FuncDef> | <FuncImpl>
+
+<System> ::= <SystemDef> | <SystemImpl>
+
+<Extern> ::= <ExternFunc> | <ExternType>
+
+<ModuleDef> ::= \lit{module} <ModuleName> \lit{exports} <ExportPayload>
+
+<ModuleName> ::= <TypeIdent> \{ \lit{.} <TypeIdent> \}
+
+<ExportPayload> ::= \lit{\{} <ExportItem> \{ \lit{,} <ExportItem> \} [ \lit{,} ] \lit{\}}
+  \alt \lit{*}
+
+<ExportItem> ::= <TypeIdent> [ <ExportMembers> ]
+  \alt <FnIdent>
+
+<ExportMembers> ::= \lit{(} ( \lit{..} | <ExportMember> \{ \lit{,} <ExportMember> \} [ \lit{,} ] ) \lit{)}
+
+<ExportMember> ::= <TypeIdent> | <FnIdent>
+
+<ImportDef> ::= \lit{use} <ModuleName> <ImportPayload>
+
+<ImportPayload> ::= \lit{as} <TypeIdent>
+  \alt \lit{\{} <ImportItem> \{ \lit{,} <ImportItem> \} [ \lit{,} ] \lit{\}}
+  \alt \lit{*}
+
+<ImportItem> ::= <TypeIdent> | <FnIdent>
+
+\end{grammar}
+
+\subsection*{2. Модифікатори}
+
+\begin{grammar}
+
+<Modifier> ::= \lit{@} <ModifierBody>
+
+<ModifierBody> ::= \lit{SharedVariant} \lit{(} <FnIdent> \lit{)}
+  \alt \lit{Memoize}
+  \alt \lit{Inline}
+  \alt \lit{Deprecated} \lit{(} <StringLiteral> \lit{)}
+  \alt \lit{SuppressUnreachable}
+  \alt \lit{CompileTime}
+  \alt \lit{Mode} \lit{(} <DispatchMode> \lit{)}
+  \alt \lit{Label} \lit{(} <TypeIdent> \lit{)}
+  \alt \lit{Parallel}
+  \alt \lit{Singleton}
+  \alt \lit{Copyable} [ \lit{(} <FnIdent> \lit{)} ]
+  \alt \lit{Pod}
+  \alt \lit{Drop} \lit{(} <FnIdent> \lit{)}
+  \alt \lit{Tag}
+  \alt \lit{NonExhaustive}
+  \alt \lit{Intrinsic}
+
+<DispatchMode> ::= \lit{Dynamic} | \lit{Safe} | \lit{Strict}
+
+\end{grammar}
+
+\subsection*{3. Функції}
+
+\begin{grammar}
+
+<FuncDef> ::= \{ <Modifier> \} \lit{fn} <FnIdent> <Params> \lit{-\textgreater{}} <Results> \lit{;}
+
+<FuncImpl> ::= \lit{fn} <FnIdent> \{ <AtomPattern> \} \lit{=} <Expr> \lit{;}
+
+<Params> ::= \lit{(} [ <MarkedType> \{ \lit{,} <MarkedType> \} ] \lit{)}
+
+<Results> ::= <ResultsTuple> | <MarkedType>
+
+<ResultsTuple> ::= \lit{(} <MarkedType> \lit{,} <MarkedType> \{ \lit{,} <MarkedType> \} \lit{)}
+
+<MarkedType> ::= [ \lit{*} ] <Type>
+
+\end{grammar}
+
+\subsection*{4. Типи}
+
+\begin{grammar}
+
+<TypeDef> ::= \{ <Modifier> \} \lit{type} <TypeIdent> \{ <GenericIdent> \} \lit{=} <Ctor> \{ \lit{\textbar{}} <Ctor> \} \lit{;}
+
+<Ctor> ::= <TypeIdent> <Payload>
+
+<Payload> ::= \lit{\{} [ <Field> \{ \lit{,} <Field> \} [ \lit{,} ] ] \lit{\}} \hfill{\itshape\small запис}
+  \alt <AtomType> \{ <AtomType> \} \hfill{\itshape\small кортеж полів}
+  \alt $\varepsilon$ \hfill{\itshape\small без даних}
+
+<Field> ::= <VarIdent> \lit{:} <Type>
+
+<Type> ::= <AtomType> \{ <AtomType> \}
+
+<AtomType> ::= \lit{(} [ <Type> \{ \lit{,} <Type> \} ] \lit{)} \hfill{\itshape\small (), (T), (T1, T2)}
+  \alt <FnType>
+  \alt <TypeIdent>
+  \alt \lit{number}
+  \alt \lit{concatenative}
+  \alt <GenericIdent>
+
+<FnType> ::= \lit{fn} <Params> \lit{-\textgreater{}} <Results>
+
+\end{grammar}
+
+\subsection*{5. Зовнішні оголошення}
+
+\begin{grammar}
+
+<ExternFunc> ::= \{ <Modifier> \} \lit{extern} \lit{fn} <FnIdent> <Params> \lit{-\textgreater{}} <Results> \lit{;}
+
+<ExternType> ::= \{ <Modifier> \} \lit{extern} \lit{type} <TypeIdent> \{ <GenericIdent> \} \lit{;}
+
+\end{grammar}
+
+\subsection*{6. Системи}
+
+\begin{grammar}
+
+<SystemDef> ::= \{ <Modifier> \} \lit{system} <TypeIdent> \{ <QueriedEntity> \} \lit{-\textgreater{}} <Type> [ <WithClause> ] \lit{;}
+
+<QueriedEntity> ::= \lit{\#(} <Type> \{ \lit{,} <Type> \} [ \lit{,} ] \lit{)}
+
+<WithClause> ::= \lit{with} <WithItem> \{ \lit{,} <WithItem> \}
+
+<WithItem> ::= \lit{event} \lit{:} <Type>
+  \alt \lit{res} \lit{:} <Type>
+
+<SystemImpl> ::= \lit{system} <TypeIdent> [ <EntityPattern> \{ \lit{,} <EntityPattern> \} ] [ \lit{with} <AtomPattern> \{ <AtomPattern> \} ] \lit{=} <Expr> \lit{;}
+
+<EntityPattern> ::= <AtomPattern> \{ <AtomPattern> \}
+
+\end{grammar}
+
+\subsection*{7. Вирази}
+
+\begin{grammar}
+
+<Expr> ::= <ApplyExpr>
+
+<ApplyExpr> ::= <ConcatExpr> [ \lit{\textless{}\textbar{}} <ApplyExpr> ] \hfill{\itshape\small правоасоціативний}
+
+<ConcatExpr> ::= <PipeExpr> \{ \lit{\textless{}\textgreater{}} <PipeExpr> \} \hfill{\itshape\small лівоасоціативний}
+
+<PipeExpr> ::= <OrExpr> \{ \lit{\textbar{}\textgreater{}} <OrExpr> \} \hfill{\itshape\small лівоасоціативний}
+
+<OrExpr> ::= <AndExpr> [ \lit{\textbar{}\textbar{}} <OrExpr> ] \hfill{\itshape\small правоасоціативний}
+
+<AndExpr> ::= <BitOrExpr> [ \lit{\&\&} <AndExpr> ] \hfill{\itshape\small правоасоціативний}
+
+<BitOrExpr> ::= <BitXorExpr> \{ \lit{\textbar{}} <BitXorExpr> \} \hfill{\itshape\small лівоасоціативний}
+
+<BitXorExpr> ::= <BitAndExpr> \{ \lit{\^{}} <BitAndExpr> \} \hfill{\itshape\small лівоасоціативний}
+
+<BitAndExpr> ::= <CompareExpr> \{ \lit{\&} <CompareExpr> \} \hfill{\itshape\small лівоасоціативний}
+
+<CompareExpr> ::= <ShiftExpr> [ <CompareOp> <ShiftExpr> ] \hfill{\itshape\small не більше одного}
+
+<ShiftExpr> ::= <AddExpr> \{ ( \lit{\textless{}\textless{}} | \lit{\textgreater{}\textgreater{}} ) <AddExpr> \} \hfill{\itshape\small лівоасоціативний}
+
+<AddExpr> ::= <MulExpr> \{ ( \lit{+} | \lit{-} ) <MulExpr> \} \hfill{\itshape\small лівоасоціативний}
+
+<MulExpr> ::= <PowExpr> \{ ( \lit{*} | \lit{/} | \lit{\%} ) <PowExpr> \} \hfill{\itshape\small лівоасоціативний}
+
+<PowExpr> ::= <UnaryExpr> [ \lit{**} <PowExpr> ] \hfill{\itshape\small правоасоціативний}
+
+<UnaryExpr> ::= \{ \lit{!} | \lit{-} \} <Term> \hfill{\itshape\small префіксний}
+
+<CompareOp> ::= \lit{==} | \lit{!=} | \lit{\textless{}=} | \lit{\textgreater{}=} | \lit{\textless{}} | \lit{\textgreater{}}
+
+<Term> ::= <PostfixExpr> \{ <PostfixExpr> \}
+
+<PostfixExpr> ::= <AtomExpr> \{ \lit{.} <Getter> \} \{ <RecUpdate> \}
+
+<Getter> ::= <Decimal> | <VarIdent> \hfill{\itshape\small tuple.0, record.field}
+
+<RecUpdate> ::= \lit{\{} <RecAssign> \{ \lit{,} <RecAssign> \} [ \lit{,} ] \lit{\}}
+
+<AtomExpr> ::= \lit{(} [ <Expr> \{ \lit{,} <Expr> \} ] \lit{)} \hfill{\itshape\small (), (e), (e1, e2)}
+  \alt [ <TypeIdent> \lit{.} ] <VarIdent> \hfill{\itshape\small змінна, можливо з префіксом}
+  \alt <RecConstruct>
+  \alt [ <TypeIdent> \lit{.} ] <TypeIdent> \hfill{\itshape\small конструктор}
+  \alt \lit{[} [ <Expr> \{ \lit{,} <Expr> \} ] \lit{]} \hfill{\itshape\small список}
+  \alt <Literal>
+  \alt <Lambda>
+  \alt <LetIn>
+  \alt <IfThenElse>
+  \alt <Match>
+
+<RecConstruct> ::= [ <TypeIdent> \lit{.} ] <TypeIdent> \lit{\{} <RecAssign> \{ \lit{,} <RecAssign> \} [ \lit{,} ] \lit{\}}
+
+<RecAssign> ::= <VarIdent> \lit{=} <Expr>
+
+<Lambda> ::= \lit{.\textbackslash{}} <LambdaParam> \{ <LambdaParam> \} \lit{-\textgreater{}} <Expr>
+
+<LambdaParam> ::= [ \lit{*} ] <Pattern>
+
+<LetIn> ::= <Let> \{ \lit{,} <Let> \} \lit{in} <Expr>
+
+<Let> ::= \lit{let} <Pattern> \lit{=} <Expr>
+
+<IfThenElse> ::= \lit{if} <Expr> \lit{then} <Expr> \lit{else} <Expr>
+
+<Match> ::= \lit{match} <Expr> \lit{with} <MatchWing> \{ \lit{,} <MatchWing> \}
+
+<MatchWing> ::= <Pattern> \lit{-\textgreater{}} <Expr>
+
+\end{grammar}
+
+\subsection*{8. Шаблони}
+
+\begin{grammar}
+
+<Pattern> ::= <TypeIdent> <AtomPattern> \{ <AtomPattern> \} \hfill{\itshape\small конструктор з полями}
+  \alt <AtomPattern>
+
+<AtomPattern> ::= \lit{(} [ <Pattern> \{ \lit{,} <Pattern> \} ] \lit{)} \hfill{\itshape\small (), (p), (p1, p2)}
+  \alt \lit{\_}
+  \alt <VarIdent>
+  \alt <TypeIdent> \hfill{\itshape\small конструктор без полів}
+  \alt \lit{[} [ <Pattern> \{ \lit{,} <Pattern> \} ] \lit{]}
+  \alt <Literal>
+
+\end{grammar}
+
+\subsection*{9. Літерали}
+
+\begin{grammar}
+
+<Literal> ::= \lit{(} [ <Literal> \{ \lit{,} <Literal> \} ] \lit{)}
+  \alt <StringLiteral>
+  \alt <CharLiteral>
+  \alt <FloatLiteral>
+  \alt <DoubleLiteral>
+  \alt <IntLiteral>
+  \alt \lit{[} [ <Literal> \{ \lit{,} <Literal> \} ] \lit{]}
+
+<IntLiteral> ::= <IntBody> [ <IntSuffix> ]
+
+<IntBody> ::= \lit{0b} <binary-digit> \{ <binary-digit> \}
+  \alt \lit{0x} <hex-digit> \{ <hex-digit> \}
+  \alt \lit{0o} <octal-digit> \{ <octal-digit> \}
+  \alt <Decimal>
+
+<Decimal> ::= <digit> \{ <digit> \}
+
+<IntSuffix> ::= \lit{uz} | \lit{ul} | \lit{us} | \lit{ub} | \lit{u} | \lit{z} | \lit{l} | \lit{s} | \lit{b}
+
+<DoubleLiteral> ::= <Decimal> \lit{.} <Decimal> [ <Exponent> ]
+
+<FloatLiteral> ::= <DoubleLiteral> \lit{f}
+
+<Exponent> ::= ( \lit{e} | \lit{E} ) [ \lit{+} | \lit{-} ] <Decimal>
+
+<CharLiteral> ::= \lit{\textquotesingle{}} <character-with-escapes> \lit{\textquotesingle{}}
+
+<StringLiteral> ::= \lit{\textquotedbl{}} \{ <character-with-escapes> \} \lit{\textquotedbl{}}
+
+\end{grammar}
+
+\subsection*{10. Лексична структура}
+
+\begin{grammar}
+
+<TypeIdent> ::= <upper-case-letter> \{ <letter-or-digit> \}
+
+<FnIdent> ::= <lower-case-letter> \{ <letter-or-digit> | \lit{\textquotesingle{}} \}
+
+<VarIdent> ::= <FnIdent>
+
+<GenericIdent> ::= <lower-case-letter>
+
+<Reserved> ::= \lit{type} | \lit{fn} | \lit{let} | \lit{in} | \lit{if} | \lit{then} | \lit{else} | \lit{match} | \lit{system} | \lit{with} | \lit{extern} | \lit{event} | \lit{res}
+
+<Whitespace> ::= \{ <space> | <newline> | <LineComment> \}
+
+<LineComment> ::= \lit{--} \{ <any-character-but-newline> \}
+
+\end{grammar}

@@ -1,0 +1,110 @@
+% Лістинги коду: мова Xast, колір, лігатури Iosevka Xast.
+%
+%   \xast|fn id = .\x -> x|        рядковий код (це \lstinline: межі будь-який символ, якого нема в коді;
+%                                    у фігурних дужках код не може містити `{` і `}`; не вкладати в аргументи макросів)
+%   \code{ім'я}                    рядковий моноширинний текст
+%   \begin{xastcode} ... \end{xastcode}              блок коду
+%   \begin{xastlisting}{Назва}  ... \end{xastlisting}  нумерований лістинг (Лістинг 1.1)
+%   \xastinput{файл.xst}  /  \xastinput[title=...]{файл.xst}   код із файлу
+%   ключі: numbered (номери рядків), title={...}, label=lst:назва
+% Те саме є для Haskell (haskellcode) і C (ccode).
+
+\definecolor{codeKeyword}{HTML}{1F4FBF}
+\definecolor{codeType}{HTML}{7B3F98}
+\definecolor{codeAnnotation}{HTML}{B35900}
+\definecolor{codeComment}{HTML}{6E6E6E}
+\definecolor{codeString}{HTML}{0A7F7A}
+\definecolor{codeNumber}{HTML}{B0306A}
+
+% Лігатури Iosevka: listings друкує символи окремо, тому оператори
+% підставляються цілим блоком, і шрифт будує з них лігатуру.
+\newcommand{\codeligature}[1]{\mbox{\xastfont #1}}
+
+\lstdefinelanguage{Xast}{
+    morekeywords={module, exports, use, as, type, fn, extern, system, match, with,
+        let, in, if, then, else, copy, boxed, number, concatenative},
+    morekeywords=[2]{Int, Long, Short, Byte, UInt, ULong, UShort, UByte, Size, USize,
+        Float, Double, Bool, Char, String, List, Vec, Option, Result},
+    morekeywords=[3]{@Copyable, @Pod, @Drop, @Singleton, @Intrinsic, @Inline,
+        @SharedVariant, @Parallel, @Deprecated},
+    alsoletter={@'},
+    sensitive=true,
+    morecomment=[l]{--},
+    morestring=[b]",
+    literate=
+        {.\\}{{\codeligature{.\textbackslash}}}2
+        {->}{{\codeligature{->}}}2
+        {<-}{{\codeligature{<-}}}2
+        {=>}{{\codeligature{=>}}}2
+        {<>}{{\codeligature{<>}}}2
+        {|>}{{\codeligature{|>}}}2
+        {==}{{\codeligature{==}}}2
+        {!=}{{\codeligature{!=}}}2
+        {<=}{{\codeligature{<=}}}2
+        {>=}{{\codeligature{>=}}}2
+        {::}{{\codeligature{::}}}2
+        {..}{{\codeligature{..}}}2
+}
+
+\lstdefinestyle{xastcodestyle}{
+    basicstyle=\xastfont\small,
+    keywordstyle=\color{codeKeyword},
+    keywordstyle=[2]\color{codeType},
+    keywordstyle=[3]\color{codeAnnotation},
+    commentstyle=\color{codeComment}\itshape,
+    stringstyle=\color{codeString},
+    numberstyle=\tiny\color{codeComment},
+    columns=fixed,
+    keepspaces=true,
+    showstringspaces=false,
+    extendedchars=false,
+    texcl=true,   % коментарі друкує LaTeX: так працює кирилиця
+    tabsize=4,
+    breaklines=true,
+    postbreak=\mbox{\textcolor{codeComment}{$\hookrightarrow$}\space},
+}
+
+\lstset{style=xastcodestyle}
+
+% Загальні налаштування рамки
+\tcbset{
+    codebox/.style={
+        listing only,
+        breakable,
+        enhanced,
+        colback=black!4,
+        colframe=black!60,
+        boxrule=0.4pt,
+        arc=1pt,
+        left=4pt, right=4pt, top=3pt, bottom=3pt,
+        fonttitle=\normalfont\small,
+        coltitle=black,
+        colbacktitle=black!12,
+        before skip=8pt, after skip=8pt,
+    },
+    numbered/.style={
+        listing options={numbers=left, numbersep=8pt, numberstyle=\scriptsize\color{codeComment}, xleftmargin=8pt},
+    },
+}
+
+\newtcblisting{xastcode}[1][]{codebox, listing options={language=Xast}, #1}
+\newtcblisting{haskellcode}[1][]{codebox, listing options={language=Haskell}, #1}
+\newtcblisting{ccode}[1][]{codebox, listing options={language=C}, #1}
+
+% Нумерований лістинг (не плаває, розривається між сторінками):
+% \begin{xastlisting}[label=lst:id]{Назва} ... \end{xastlisting}
+\newtcblisting[auto counter, number within=chapter]{xastlisting}[2][]{
+    codebox, listing options={language=Xast},
+    title={Лістинг~\thetcbcounter~--- #2},
+    title after break={Лістинг~\thetcbcounter{} (продовження)},
+    #1
+}
+
+% Код із файлу
+\newcommand{\xastinput}[2][]{%
+    \tcbinputlisting{codebox, listing options={language=Xast}, listing file={#2}, #1}%
+}
+
+% Рядковий код
+\newcommand{\xast}{\lstinline[language=Xast]}
+\newcommand{\code}[1]{\texttt{#1}}

@@ -3,6 +3,7 @@
 module SemAnalyzer where
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Data.Text as T
 
 import Control.Monad (unless)
@@ -14,14 +15,18 @@ import Data.Text (Text)
 
 import Test.HUnit
 
-import Xast.AST (PackageName, stdPackageName, Program (..), ModuleDef (..), Ident (..))
+import Xast.AST
+   ( PackageName, stdPackageName, Program (..), ModuleDef (..), Ident (..)
+   , Expr (..), Stmt (..), Func (..), FuncImpl (..), Match (..), MatchWing (..)
+   , LivenessAnalyzed (..), NoMoveOutcome (..), OwnershipDecision (..), Type (..)
+   )
 import Xast.Codegen.C.Intrinsics (intrinsicBodies)
 import Xast.Error.Types
 import Xast.Intrinsics (intrinsicArities)
 import Xast.Parser.Program (parseProgram)
 import Xast.SemAnalyzer.Declare (hasMisplacedPrime)
 import Xast.SemAnalyzer.Pass (fullAnalysis)
-import Xast.SemAnalyzer.Types (AnalysisResult)
+import Xast.SemAnalyzer.Types (AnalysisResult (..))
 import Xast.Utils.Compiler (Target (Target64))
 
 tests :: Test
@@ -37,6 +42,7 @@ tests = TestList
    , TestLabel "Match exhaustiveness" exhaustivenessTests
    , TestLabel "Unique variants"      uniqueVariantTests
    , TestLabel "Copyability"          copyabilityTests
+   , TestLabel "Copy requirements"    copyRequirementTests
    , TestLabel "Parameter modes"      parameterModeTests
    , TestLabel "Systems"              systemTests
    ]
@@ -1053,3 +1059,52 @@ isUnknownField = \case { SETypeCheckError (SEUnknownField {}) -> True; _ -> Fals
 isNotARecordType = \case { SETypeCheckError (SENotARecordType {}) -> True; _ -> False }
 isInvalidTupleIndex = \case { SETypeCheckError (SEInvalidTupleIndex {}) -> True; _ -> False }
 isNonExhaustiveMatch = \case { SETypeCheckError (SENonExhaustiveMatch {}) -> True; _ -> False }
+
+-- #### COPY REQUIREMENTS ####
+
+copyRequirementTests :: Test
+copyRequirementTests = TestList
+   [ named "a @Pod value is cloned" $ assertOutcomes [Clone { inLoop = False }]
+      [ "@Pod extern type N;", "fn f (N) -> N;", "fn f x = x;" ]
+
+   , named "an opaque value is rejected" $ assertOutcomes [Reject]
+      [ "extern type H;", "fn f (H) -> H;", "fn f x = x;" ]
+
+   , named "a generic value is cloned if its type is copyable" $ assertOutcomes [requiring ["a"]]
+      [ "fn f (a) -> a;", "fn f x = x;" ]
+
+   , named "a conditionally copyable type needs its parameter" $ assertOutcomes [requiring ["a"]]
+      [ "@Copyable type Box a = Box a;", "fn f (Box a) -> Box a;", "fn f x = x;" ]
+
+   , named "a conditionally copyable type with an opaque parameter is rejected" $ assertOutcomes [Reject]
+      [ "extern type H;", "@Copyable type Box a = Box a;", "fn f (Box H) -> Box H;", "fn f x = x;" ]
+
+   , named "a type with a copyable parameter needs nothing" $ assertOutcomes [Clone { inLoop = False }]
+      [ "@Pod extern type N;", "@Copyable type Box a = Box a;", "fn f (Box N) -> Box N;", "fn f x = x;" ]
+   ]
+
+-- | The generics that must be copyable for the clone to exist.
+requiring :: [Text] -> NoMoveOutcome
+requiring names = CloneIf { inLoop = False, requires = S.fromList [ TyGnr (Ident name) | name <- names ] }
+
+-- | The program declares `f`, whose body only returns its variables:
+--   the outcome of every use that is not a move, in order.
+assertOutcomes :: [NoMoveOutcome] -> [Text] -> Assertion
+assertOutcomes expected declarations = analyze (inModule declarations) >>= \case
+   Left errors  -> assertFailure ("unexpected errors: " <> show errors)
+   Right result -> assertEqual "outcomes" expected (outcomesOfFunction "f" result.progs)
+
+outcomesOfFunction :: Text -> [Program LivenessAnalyzed] -> [NoMoveOutcome]
+outcomesOfFunction name programs =
+   [ outcome
+   | program <- programs
+   , StmtFunc (FnImpl impl) <- program.stmts
+   , impl.name == Ident name
+   , NoMove { outcome } <- decisionsIn impl.body
+   ]
+
+decisionsIn :: Expr LivenessAnalyzed -> [OwnershipDecision]
+decisionsIn = \case
+   ExpVar { info }    -> maybe [] pure info.decision
+   ExpMatch { match } -> concatMap (decisionsIn . (.body)) match.matches
+   _                  -> []

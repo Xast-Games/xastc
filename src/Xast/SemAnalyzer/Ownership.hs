@@ -156,16 +156,27 @@ checkCopyableFields typeDef =
 -- | Whether values of a type may be copied, given that its type parameters can be:
 --   @Option Int@ needs both @Option@ and @Int@ to be copyable.
 isCopyableType :: Type -> SemAnalyzer Bool
-isCopyableType = \case
-   TyTuple elements -> allM isCopyableType elements
-   TyFn {}          -> pure True  -- a function that captures nothing
+isCopyableType type' = (/= NeverCopyable) <$> copyRequirement type'
+
+-- | What a type needs to be copied. A generic or an inference variable is copyable
+--   if it is instantiated with a copyable type, so it becomes a requirement of its own:
+--   @Option a@ needs @a@, @(a, File)@ is never copyable.
+copyRequirement :: Type -> SemAnalyzer CopyRequirement
+copyRequirement = \case
+   generic@(TyGnr _)  -> pure (CopyableIf (S.singleton generic))
+   variable@(TyVar _) -> pure (CopyableIf (S.singleton variable))
+   TyTuple elements   -> mconcat <$> mapM copyRequirement elements
+   TyFn {}            -> pure mempty  -- a function that captures nothing
    type' -> case typeHeadAndArgs type' of
       Just (typeName, args) -> do
-         copyable <- (/= NotCopyable) <$> copyabilityOf typeName
-         argsCopyable <- allM isCopyableType args
-         pure (copyable && argsCopyable)
-      -- generics count as copyable here; unknown types are reported elsewhere
-      Nothing -> pure True
+         copyability <- copyabilityOf typeName
+         argRequirements <- mapM copyRequirement args
+         pure $ if copyability == NotCopyable then 
+            NeverCopyable
+         else 
+            mconcat argRequirements
+      -- unknown types are reported elsewhere
+      Nothing -> pure mempty
 
 -- | A @Pod type, without type arguments.
 isPodType :: Type -> SemAnalyzer Bool
@@ -200,10 +211,3 @@ typeHeadAndArgs = \case
    TyCon typeName      -> Just (typeName, [])
    TyApp function arg  -> fmap (\(typeName, args) -> (typeName, args ++ [arg])) (typeHeadAndArgs function)
    _                   -> Nothing
-
-allM :: (a -> SemAnalyzer Bool) -> [a] -> SemAnalyzer Bool
-allM predicate = \case
-   []            -> pure True
-   first : rest -> predicate first >>= \case
-      True  -> allM predicate rest
-      False -> pure False

@@ -6,22 +6,72 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 import Control.Monad (foldM)
-import Control.Monad.Reader (MonadReader (ask, local), asks)
+import Control.Monad.Reader (MonadReader (ask, local), asks, runReaderT)
 import Control.Monad.State (MonadTrans (lift))
 
 import Data.Maybe (fromMaybe, listToMaybe)
 
 import Xast.AST
 import Xast.SemAnalyzer.Monad (SemAnalyzer)
-import Xast.SemAnalyzer.Ownership (isCopyableType)
+import Xast.SemAnalyzer.Ownership (copyRequirement)
 import Xast.SemAnalyzer.OwnershipTable
 import Xast.Utils.Generic (todo__)
 
 analyzeLiveness :: Program Desugared -> SemAnalyzer (Program LivenessAnalyzed)
 analyzeLiveness program = do
-   let fnImpls = [ impl | StmtFunc (FnImpl impl) <- program.stmts ]
+   let definitions = M.fromList
+         [ (definition.name, definition)
+         | StmtFunc (FnDef definition) <- program.stmts
+         ]
+   stmts' <- mapM (analyzeStmt definitions) program.stmts
 
-   undefined
+   return Program
+      { moduleDef = program.moduleDef
+      , imports   = program.imports
+      , stmts     = stmts'
+      , src       = program.src
+      }
+
+analyzeStmt
+   :: M.Map FunctionName FuncDef
+   -> Stmt Desugared
+   -> SemAnalyzer (Stmt LivenessAnalyzed)
+analyzeStmt definitions = \case
+   StmtFunc (FnImpl impl) -> do
+      let marks = maybe [] (map (.node.mark) . (.args)) (M.lookup impl.name definitions)
+      impl' <- analyzeFunction marks impl
+      return (StmtFunc (FnImpl impl'))
+
+   -- Systems are not analyzed yet
+   other -> return (fmap (livenessInfo Nothing) other)
+
+analyzeFunction
+   :: [Mark]
+   -> FuncImpl Desugared
+   -> SemAnalyzer (FuncImpl LivenessAnalyzed)
+analyzeFunction marks impl = do
+   let env = WalkEnv { notOwned = borrowedParameters marks impl.body }
+   (_, body') <- runReaderT (analyzeExpr (Handed Returned) M.empty impl.body) env
+
+   return FuncImpl
+      { location = impl.location
+      , name     = impl.name
+      , args     = map (fmap (livenessInfo Nothing)) impl.args
+      , body     = body'
+      }
+
+-- | The parameters of a desugared function are the variables of the tuple
+--   that its body matches on, in the order of the declaration.
+borrowedParameters :: [Mark] -> Expr Desugared -> S.Set VarName
+borrowedParameters marks body = S.fromList
+   [ name
+   | (ExpVar { name }, Read) <- zip (parameterVariables body) marks
+   ]
+
+parameterVariables :: Expr Desugared -> [Expr Desugared]
+parameterVariables = \case
+   ExpMatch { match } -> scrutineeParts match.baseExpr
+   _                  -> []
 
 analyzeExpr
    :: Usage
@@ -371,6 +421,14 @@ isLocal = \case
    Just (ResLocal _) -> True
    _ -> False
 
+-- | A clone is made, is made only if the type's generics are copyable, or is an error.
+cloneOutcome :: CopyRequirement -> NoMoveOutcome
+cloneOutcome = \case
+   NeverCopyable -> Reject
+   CopyableIf required
+      | S.null required -> Clone { inLoop = False }
+      | otherwise       -> CloneIf { inLoop = False, requires = required }
+
 decideUse
    :: SecondNameKind
    -> Desugared
@@ -379,14 +437,10 @@ decideUse
    -> Walk OwnershipDecision
 decideUse kind info name neededAfter = do
    env      <- ask
-   copyable <- lift $ isCopyableType info.ty
+   requirement <- lift $ copyRequirement info.ty
    let noMove cause = NoMove
          { valueType = info.ty
-         , outcome =
-            if copyable then
-               Clone { inLoop = False }
-            else
-               Reject
+         , outcome = cloneOutcome requirement
          , ..
          }
 

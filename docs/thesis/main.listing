@@ -1,0 +1,5 @@
+type Option a = Some a | None;
+
+fn isSome (Option a) -> Bool;
+fn isSome (Some _) = True;
+fn isSome _ = False;

@@ -1,11 +1,145 @@
 \chapter{ПРОЄКТУВАННЯ МОВИ ПРОГРАМУВАННЯ XAST}
 
+\textbf{Xast} --- це функціональна мова програмування зі статичною строгою типізацією,
+яка компілюється в код мовою C і призначена для розробки ігор. У ній поєднано
+чисті функції та архітектуру ECS як базову систему для керування пам'яттю: мова не використовує технологій збирача сміття, підрахунку посилань, а її модель пам'яті лежить в ECS сутностях та моделі унікальності.
+
+Проєктування спирається на задачі, поставлені в розділі 1:
+\begin{itemize}
+    \item значення незмінні, а зміна на місці можлива лише там, де її гарантує
+          система типів --- це дає швидкість і безпечність без збирача сміття;
+    \item побічні ефекти видно в сигнатурах функцій;
+    \item ECS є частиною мови: системи та компоненти описуються в самих програмах.
+\end{itemize}
+
+Лістинг~\ref{lst:example} показує невелику програму на Xast, яка показує частину можливостей мови:
+
+\begin{xastlisting}[label=lst:example]{Приклад програми на Xast}
+module Game.Movement exports *
+
+use Std.Option *
+
+type Dir = Left | Right;
+
+type Position = Position Double Double;
+type Velocity = Velocity Double Double;
+
+fn flip (Dir) -> Dir;
+fn flip Left = Right;
+fn flip Right = Left;
+
+fn orZero (Option Int) -> Int;
+fn orZero value = match value with
+    Some n -> n,
+    _      -> 0;
+
+system Move #(Position, Velocity) -> Position;
+system Move (Position x y) (Velocity dx dy) =
+    Position (x + dx) (y + dy);
+\end{xastlisting}
+
+У ній оголошено модуль з імпортом зі стандартної бібліотеки, перелічуваним типом \xast|Dir| і типами-кортежами \xast|Position| та \xast|Velocity|, функцією \xast|flip|, заданою двома умовами паттерн-матчингу над її параметром, і функцією \xast|orZero|, що зіставляє значення \xast|Option|; а також ECS-системою \xast|Move|, яка для кожної сутності з компонентами \xast|Position| та \xast|Velocity| обчислює нову позицію.
+
+Далі в розділі мову описано послідовно. У підрозділі~\ref{sec:syntax} наведено синтаксис і систему модулів, у~\ref{sec:types} --- систему типів і виведення типів, у~\ref{sec:ownership} --- модель унікальності та володіння, яка замінює збирач сміття, у~\ref{sec:memory} --- керування пам'яттю, а в~\ref{sec:ecs} --- системи та ресурси ECS.
+
 \section{Синтаксис та система модулів}
+\label{sec:syntax}
+
+Кожна програма на Xast складається з модулів --- окремих одиниць коду, що імпортують залежності та експортують публічне API: в Xast це функції, типи, конструктори тощо. Кожному модулю відповідає окремий файл та іменування модулів повністю відповідає іменуванню файлів у вигляді:
+
+\texttt{src/Folder1/Folder2/MyModule.xst} $\to$ \xast{module Folder.Folder2.MyModule}
+
+Модуль в мові Xast складається з:
+
+\begin{itemize}
+    \item \textbf{Об'явлення модулю}: назва модулю та елементи, які цей модуль експортує; наприклад:
+    \begin{xastcode}
+        module Folder1.Folder2.MyModule exports { myFunc, MyType }
+    \end{xastcode}
+    \item \textbf{Блок імпортів}: імпорти залежностей з інших модулів як цього проєкту, так і зовнішніх, які підключені до проєкту. Якщо залежності між модулями формують цикл, наприклад:
+
+    \begin{center}
+        \begin{tikzcd}
+        A \arrow[rr, "\text{imports}", bend left] &  & B \arrow[ld, "\text{imports}", bend left] \\
+        & C \arrow[lu, "\text{imports}", bend left] & 
+        \end{tikzcd}
+    \end{center}
+
+    то це викличе помилку компіляції. Це спрощує вирішення імпортів в компіляторі і змушує розробника розподілити залежності між модулями і цим сприяє чистоті коду. Самі імпорти бувають: \begin{enumerate}
+        \item \textit{вибіркові}: дозволяють вибрати частину елементів, експортованих модулем:
+        
+        \begin{xastcode}
+            use A { f, g, h, T }
+        \end{xastcode}
+
+        \item \textit{повні}: дозволяють імпортувати всі елементи модулю, щоб не перераховувати їх через кому:
+        
+        \begin{xastcode}
+            use A *
+        \end{xastcode}
+
+        \item \textit{псевдонімні} або \textit{alias-імпорти}: використовуються для того, коли різні модулі експортують елементи з однаковою назвою (наприклад \xast{List.map} та \xast{Option.map}). Також, коли модуль описує лише функції певного типу, доречно використовувати alias-імпорти, наприклад:
+        
+        \begin{xastcode}
+use MyPackage.Rgba as Rgba;
+..
+let color = Rgba.new 255 255 0 255
+    |> Rgba.desaturate
+    |> Rgba.toHsv
+in ..
+        \end{xastcode}
+    \end{enumerate} 
+
+    \item \textbf{Блок оголошень} \engl{statement}: тут оголошуються всі типи та функції, що модуль експортує або використовує внутрішньо. Сигнатури та реалізації функцій оголошуються окремо, але в межах одного модуля, щоб забезпечити можливість зіставлення зі зразком \engl{pattern matching} на рівні параметрів; наприклад:
+    
+    \begin{xastcode}
+type Option a = Some a | None;
+
+fn isSome (Option a) -> Bool;
+fn isSome (Some _) = True;
+fn isSome _ = False;
+    \end{xastcode}
+\end{itemize}
+
+Всього Xast містить 4 типи оголошень: типи, функції, ECS-системи та зовнішні \engl{extern} елементи. У формальній граматиці модуль з оголошеннями представлений так:
+
+\begin{grammar}
+<Program> ::= <ModuleDef> \{ <ImportDef> \} \{ <Stmt> \}
+
+<Stmt> ::= <Func> | <System> | <TypeDef> | <Extern>
+
+<Func> ::= <FuncDef> | <FuncImpl>
+
+<System> ::= <SystemDef> | <SystemImpl>
+
+<Extern> ::= <ExternFunc> | <ExternType>
+
+<ModuleDef> ::= \lit{module} <ModuleName> \lit{exports} <ExportPayload>
+
+<ModuleName> ::= <TypeIdent> \{ \lit{.} <TypeIdent> \}
+
+<ExportPayload> ::= \lit{\{} <ExportItem> \{ \lit{,} <ExportItem> \} \lit{\}}
+| \lit{*}
+
+<ImportDef> ::= \lit{use} <ModuleName> <ImportPayload>
+
+<ImportPayload> ::= \lit{as} <TypeIdent>
+  \alt \lit{\{} <ImportItem> \{ \lit{,} <ImportItem> \} \lit{\}}
+  \alt \lit{*}
+\end{grammar}
+
+\subsection{Функції}
+
+Будь-яка програма на Xast складається з функцій, їх композиції та застосування. Оголошення функції складається з двох частин --- визначення та реалізації. Кожне визначення повинне мати не менше ніж одну реалізацію, а кожна реалізація --- мати лише одне визначення, оскільки єдина сигнатура дозволяє порівняти тип реалізації з оголошеним визначення під час виведення типів на етапі семантичного аналізу (див. п. 2.2).
 
 \section{Система типів та виведення типів}
+\label{sec:types}
 
 \section{Модель унікальності та володіння}
+\label{sec:ownership}
 
 \section{Керування пам'яттю}
+\label{sec:memory}
 
 \section{Системи та ресурси ECS}
+\label{sec:ecs}
